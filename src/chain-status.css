@@ -1,0 +1,5 @@
+.chain-status { margin: 16px 2.05vw; padding: 12px 16px; border: 1px solid #c7c4b9; border-radius: 8px; background: #f7f3e9; color: #315b31; font: 12px/1.6 "DM Mono", monospace; }
+.chain-status summary { cursor: pointer; }
+.chain-status p { color: #575c52; overflow-wrap: anywhere; }
+.chain-status code { font: inherit; }
+.chain-status button:disabled { opacity: .5; cursor: wait; }

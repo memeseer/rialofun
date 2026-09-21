@@ -1,0 +1,17 @@
+name = "rialofun"
+main = "worker/index.js"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rialofun-index"
+database_id = "ec11ae62-76af-4247-bf0a-479ebf2f6f20"
+migrations_dir = "migrations"
+
+[assets]
+directory = "./dist/client"
+binding = "ASSETS"
+not_found_handling = "none"
+
+[triggers]
+crons = ["*/1 * * * *"]
