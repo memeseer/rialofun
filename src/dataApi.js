@@ -4,6 +4,11 @@ const JSON_HEADERS = { "content-type": "application/json" };
 const API_BASE = (import.meta.env.VITE_RIALOFUN_API || "").replace(/\/$/, "");
 const absoluteUrl = (value) => value && value.startsWith("/") ? `${API_BASE}${value}` : value;
 const apiPath = (value) => API_BASE && value?.startsWith(API_BASE) ? value.slice(API_BASE.length) : value;
+const versionedImageUrl = (value, version) => {
+  const resolved = absoluteUrl(value);
+  if (!resolved || !resolved.includes("/api/images/")) return resolved;
+  return `${resolved}${resolved.includes("?") ? "&" : "?"}v=${encodeURIComponent(version || "binary-v2")}`;
+};
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, options);
@@ -65,5 +70,5 @@ export async function fetchMarketTrades(marketId, state) {
 
 export async function fetchMarketMetadata() {
   const payload = await api("/api/metadata");
-  return Array.isArray(payload.markets) ? payload.markets.map((market) => ({ ...market, image: absoluteUrl(market.image) })) : [];
+  return Array.isArray(payload.markets) ? payload.markets.map((market) => ({ ...market, image: versionedImageUrl(market.image, market.updatedAt) })) : [];
 }
