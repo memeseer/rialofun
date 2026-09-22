@@ -23,6 +23,7 @@ export function createMarket({ id, name, ticker, creator, image = "" }) {
     volumeRlo: 0,
     holders: 0,
     createdAt: Date.now(),
+    updatedAt: Date.now(),
   };
 }
 

@@ -95,6 +95,7 @@ async function indexTransaction(db, item) {
     await db.prepare(`INSERT INTO trades (signature,market_id,account,side,rlo_amount,token_amount,price,block_time,verified)
       VALUES (?,?,?,?,?,?,?,?,1) ON CONFLICT(signature) DO UPDATE SET market_id=excluded.market_id,account=excluded.account,side=excluded.side,rlo_amount=excluded.rlo_amount,token_amount=excluded.token_amount,price=excluded.price,block_time=excluded.block_time,verified=1`)
       .bind(item.signature, marketId, event.trader || "On-chain", side, rloAmount, tokenDelta, price, time).run();
+    await db.prepare("UPDATE markets SET updated_at=? WHERE id=?").bind(time, marketId).run();
   }
   await db.prepare("INSERT OR REPLACE INTO indexed_transactions (signature,block_height,indexed_at) VALUES (?,?,?)").bind(item.signature, Number(item.blockHeight || transaction.block_height || 0), Date.now()).run();
 }

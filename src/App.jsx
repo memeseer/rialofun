@@ -128,7 +128,7 @@ export function App() {
   const [activeFilter, setActiveFilter] = useState("Latest");
   const [wallet, setWallet] = useState("");
   const [notice, setNotice] = useState("");
-  const [markets, setMarkets] = useState(() => [...loadOnchainMarkets(), ...seededMarkets]);
+  const [markets, setMarkets] = useState(() => [...loadOnchainMarkets()]);
   const [launchOpen, setLaunchOpen] = useState(false);
   const [launchRoute, setLaunchRoute] = useState(() => window.location.hash === "#launch");
   const [theme, setTheme] = useState(() => localStorage.getItem("rialofun:theme") || "light");
@@ -178,8 +178,8 @@ export function App() {
     if (activeFilter === "Top volume")
       return next.sort((a, b) => b.volumeRlo - a.volumeRlo);
     if (activeFilter === "Newest")
-      return next.sort((a, b) => b.createdAt - a.createdAt);
-    return next.sort((a, b) => b.createdAt - a.createdAt);
+      return next.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    return next.sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0));
   }, [activeFilter, markets]);
 
   const connectWallet = async () => {
@@ -244,10 +244,31 @@ export function App() {
     void discoverOnchainMarkets().then((found) => setMarkets((current) => { const byState = new Map(found.map(item => [item.onchain.state, item])); return current.map(item => byState.get(item.onchain?.state) ? { ...item, ...byState.get(item.onchain.state) } : item).concat(found.filter(item => !current.some(existing => existing.onchain?.state === item.onchain.state))); })).catch(() => undefined);
   }, [wallet]);
   useEffect(() => {
-    void fetchMarketMetadata().then((metadata) => setMarkets((current) => current.map((market) => {
-      const saved = metadata.find((item) => item.id === market.id || item.state === market.onchain?.state);
-      return saved ? { ...market, name: saved.name, ticker: saved.ticker, creator: saved.creator, image: saved.image, createdAt: Number(saved.createdAt || market.createdAt) } : market;
-    }))).catch(() => undefined);
+    void fetchMarketMetadata().then((metadata) => setMarkets((current) => {
+      const next = [...current];
+      for (const saved of metadata) {
+        const index = next.findIndex((market) => market.id === saved.id || market.onchain?.state === saved.state);
+        const patch = {
+          name: saved.name,
+          ticker: saved.ticker,
+          creator: saved.creator,
+          image: saved.image,
+          createdAt: Number(saved.createdAt || 0) || undefined,
+          updatedAt: Number(saved.updatedAt || saved.createdAt || 0) || undefined,
+        };
+        if (index >= 0) {
+          next[index] = { ...next[index], ...patch, createdAt: patch.createdAt || next[index].createdAt, updatedAt: patch.updatedAt || next[index].updatedAt };
+        } else if (saved.state && saved.mint) {
+          next.push({
+            ...createMarket({ id: saved.id, name: saved.name, ticker: saved.ticker, creator: saved.creator, image: saved.image }),
+            ...patch,
+            id: saved.id,
+            onchain: { program: "2iquqTG5Frnj64kzwa5RFWawuJpXg3fYhMkTPiT22AiM", state: saved.state, mint: saved.mint },
+          });
+        }
+      }
+      return next;
+    })).catch(() => undefined);
   }, []);
 
   const launch = async (event) => {
@@ -270,6 +291,7 @@ export function App() {
       creator: `${wallet.slice(0, 5)}…${wallet.slice(-4)}`,
       image: persistentImage,
     });
+    market.updatedAt = Date.now();
     const initialBuy = Number(form.initialBuy || 0);
     if (!Number.isFinite(initialBuy) || initialBuy < 0)
       return setNotice("Initial buy must be a valid RLO amount.");
@@ -343,6 +365,7 @@ export function App() {
           minOut: minimum,
         });
         const synced = await syncMarket(selected, wallet);
+        setMarkets((current) => current.map((item) => item.id === selected.id ? { ...item, updatedAt: Date.now() } : item));
         const rlo = await getRloBalance(wallet);
         setPortfolio((current) => ({ ...current, rlo }));
         const confirmed = { marketId:selected.id, signature:result.signature, side:tradeSide.toUpperCase(), account:wallet, rloAmount:tradeSide === "buy" ? String(amount) : String(tradeQuote.output), tokenAmount:tradeSide === "buy" ? String(tradeQuote.output) : String(amount), price:spotPrice(synced), time:Date.now() };
@@ -369,7 +392,7 @@ export function App() {
     if (result.quote.error) return setNotice(result.quote.error);
     setMarkets((current) =>
       current.map((market) =>
-        market.id === selected.id ? result.market : market,
+        market.id === selected.id ? { ...result.market, updatedAt: Date.now() } : market,
       ),
     );
     setPortfolio((current) => ({

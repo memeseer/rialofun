@@ -84,7 +84,7 @@ async function handleImage(request, env, url) {
 async function handleMetadata(request, env) {
   const db = requireBinding(env, "DB");
   if (request.method === "GET") {
-    const { results } = await db.prepare("SELECT id, state, mint, name, ticker, creator, image_url AS image, created_at AS createdAt FROM markets ORDER BY created_at DESC LIMIT 500").all();
+    const { results } = await db.prepare("SELECT id, state, mint, name, ticker, creator, image_url AS image, created_at AS createdAt, updated_at AS updatedAt FROM markets ORDER BY updated_at DESC LIMIT 500").all();
     return json({ markets: results }, { headers: { "cache-control": "public, max-age=15" } });
   }
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -125,9 +125,12 @@ async function handleTrades(request, env, url) {
     if (!trade.marketId || !trade.signature || !trade.account || !["BUY", "SELL"].includes(trade.side) || !Number.isFinite(trade.rloAmount) || !Number.isFinite(trade.price)) {
       return json({ error: "Invalid confirmed trade payload." }, { status: 400 });
     }
-    await db.prepare(`INSERT INTO trades (signature,market_id,account,side,rlo_amount,token_amount,price,block_time,verified)
-      VALUES (?,?,?,?,?,?,?,?,0) ON CONFLICT(signature) DO UPDATE SET rlo_amount=excluded.rlo_amount,token_amount=excluded.token_amount,price=excluded.price,block_time=excluded.block_time`)
-      .bind(trade.signature, trade.marketId, trade.account, trade.side, trade.rloAmount, trade.tokenAmount, trade.price, trade.time).run();
+    await db.batch([
+      db.prepare(`INSERT INTO trades (signature,market_id,account,side,rlo_amount,token_amount,price,block_time,verified)
+        VALUES (?,?,?,?,?,?,?,?,0) ON CONFLICT(signature) DO UPDATE SET rlo_amount=excluded.rlo_amount,token_amount=excluded.token_amount,price=excluded.price,block_time=excluded.block_time`)
+        .bind(trade.signature, trade.marketId, trade.account, trade.side, trade.rloAmount, trade.tokenAmount, trade.price, trade.time),
+      db.prepare("UPDATE markets SET updated_at=? WHERE id=?").bind(trade.time, trade.marketId),
+    ]);
     return json({ trade }, { status: 201 });
   }
   const match = url.pathname.match(/^\/api\/markets\/([^/]+)\/trades$/);
