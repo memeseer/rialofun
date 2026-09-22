@@ -43,3 +43,47 @@
 .detail-route .chart-range button:first-child{color:#8e9990;background:transparent}
 .detail-route .chart-range button.active{color:#0a0c0a;background:#a8ff65}
 .theme-light.token-route .chart-range button.active{color:#f7f3e9;background:#315b31}
+
+/* RialoFun design polish: a restrained terminal/editorial system. */
+:root{
+  --rf-ink:#171914;
+  --rf-muted:#62685e;
+  --rf-line:#c9c5b8;
+  --rf-paper:#f7f3e9;
+  --rf-paper-strong:#fffdf7;
+  --rf-green:#315b31;
+  --rf-lime:#a8ff65;
+  --rf-red:#c94b45;
+  --rf-radius:10px;
+  --rf-ease:cubic-bezier(.22,.8,.24,1);
+}
+::selection{background:var(--rf-lime);color:#10130e}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--rf-green);outline-offset:3px}
+.app-shell{color:var(--rf-ink);transition:background-color .25s var(--rf-ease),color .25s var(--rf-ease)}
+.topbar{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--rf-paper) 92%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.brand{letter-spacing:-1.9px}.brand img{box-shadow:0 0 0 1px color-mix(in srgb,var(--rf-ink) 18%,transparent)}
+.ticker{background:color-mix(in srgb,var(--rf-paper) 82%,transparent)}
+.ticker span{font-size:10px;letter-spacing:.35px;color:var(--rf-muted)}
+.ticker b{color:var(--rf-ink)}
+.hero{position:relative;background:linear-gradient(110deg,color-mix(in srgb,var(--rf-paper-strong) 88%,transparent),color-mix(in srgb,var(--rf-paper) 72%,transparent));box-shadow:0 14px 40px rgba(38,42,26,.06)}
+.hero::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.3;background-image:linear-gradient(90deg,transparent 0 49.8%,rgba(49,91,49,.12) 50%,transparent 50.2%);background-size:110px 100%}
+.hero>div{position:relative;z-index:1}.hero .eyebrow{font-weight:500}.subhead{max-width:44ch;line-height:1.5}
+.market-section{max-width:1440px;margin-left:auto;margin-right:auto}
+.trend-item,.market-card{transition:transform .22s var(--rf-ease),border-color .22s var(--rf-ease),box-shadow .22s var(--rf-ease)}
+.trend-item:hover,.market-card:hover{transform:translateY(-3px);border-color:var(--rf-green);box-shadow:0 10px 24px rgba(29,46,26,.08)}
+.market-card{background:color-mix(in srgb,var(--rf-paper-strong) 50%,transparent)}
+.market-card .token-image{background:var(--rf-paper-strong)}
+.card-top h3{font-weight:700}.market-price{letter-spacing:-.7px}.curve>i{height:7px}.creator button{min-height:32px;padding:5px 0}
+.notice{z-index:80;max-width:min(420px,calc(100vw - 32px));border-radius:8px}
+.theme-dark{--rf-ink:#edf1e9;--rf-muted:#8d988f;--rf-line:#303833;--rf-paper:#080a09;--rf-paper-strong:#0d100f;--rf-green:#a8ff65;background:#080a09;color:#edf1e9}
+.theme-dark .app-shell{background:radial-gradient(circle at 50% -20%,#18211a 0,#080a09 58%)}
+.theme-dark .topbar,.theme-dark .ticker{background:rgba(8,10,9,.86);border-color:#252b27}
+.theme-dark .ticker span{border-color:#252b27;color:#8d988f}.theme-dark .ticker b{color:#edf1e9}
+.theme-dark .hero{border-color:#2d342f;background:linear-gradient(110deg,#0d100f,#111711);box-shadow:0 18px 44px rgba(0,0,0,.24)}
+.theme-dark .hero::after{background-image:linear-gradient(90deg,transparent 0 49.8%,rgba(168,255,101,.12) 50%,transparent 50.2%)}
+.theme-dark .subhead,.theme-dark .hero-note{color:#a5afa6}.theme-dark .market-card,.theme-dark .trend-item{background:#0d100f;box-shadow:none}
+.theme-dark .market-card .token-image{background:#121614;border-color:#303833}.theme-dark .market-price,.theme-dark .card-top h3{color:#edf1e9}
+.theme-dark .section-title h2,.theme-dark .section-title h2 span{color:#edf1e9}.theme-dark .local-balance{border-color:#303833;color:#a5afa6}
+.theme-dark .trend-item:hover,.theme-dark .market-card:hover{box-shadow:0 12px 30px rgba(0,0,0,.24)}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
+@media(max-width:620px){.hero::after{display:none}.ticker{overflow-x:auto}.ticker span{min-width:150px}.market-card:hover,.trend-item:hover{transform:none}}
