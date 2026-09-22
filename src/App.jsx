@@ -64,10 +64,30 @@ const compact = (number) =>
   }).format(number);
 
 function TokenVisual({ market }) {
-  return market.image ? (
+  const [visibleImage, setVisibleImage] = useState("");
+
+  useEffect(() => {
+    if (!market.image) {
+      setVisibleImage("");
+      return undefined;
+    }
+
+    let active = true;
+    const preload = new Image();
+    preload.onload = () => {
+      if (active) setVisibleImage(market.image);
+    };
+    preload.src = market.image;
+    return () => {
+      active = false;
+      preload.onload = null;
+    };
+  }, [market.image]);
+
+  return visibleImage ? (
     <img
       className="token-image"
-      src={market.image}
+      src={visibleImage}
       alt={`${market.name} token artwork`}
     />
   ) : (
