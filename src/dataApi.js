@@ -1,6 +1,7 @@
 const JSON_HEADERS = { "content-type": "application/json" };
-const API_BASE = (import.meta.env.VITE_RIALOFUN_API || (import.meta.env.PROD ? "https://rialofun.rialofun.workers.dev" : ""))
-  .replace(/\/$/, "");
+// Production uses the Vercel same-origin proxy so metadata/images work even
+// when a browser cannot resolve the workers.dev hostname directly.
+const API_BASE = (import.meta.env.VITE_RIALOFUN_API || "").replace(/\/$/, "");
 const absoluteUrl = (value) => value && value.startsWith("/") ? `${API_BASE}${value}` : value;
 const apiPath = (value) => API_BASE && value?.startsWith(API_BASE) ? value.slice(API_BASE.length) : value;
 

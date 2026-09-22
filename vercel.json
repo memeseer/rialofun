@@ -2,5 +2,8 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist/client",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://rialofun.rialofun.workers.dev/api/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
