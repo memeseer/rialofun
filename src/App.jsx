@@ -275,7 +275,13 @@ export function App() {
           image: saved.image,
           createdAt: Number(saved.createdAt || 0) || undefined,
           updatedAt: Number(saved.updatedAt || saved.createdAt || 0) || undefined,
+          volumeRlo: Number(saved.volumeRlo) || 0,
+          holders: Number(saved.holders) || 0,
         };
+        if (saved.phase) patch.phase = saved.phase;
+        if (Number.isFinite(Number(saved.virtualRlo))) patch.virtualRlo = Number(saved.virtualRlo);
+        if (Number.isFinite(Number(saved.tokenReserve))) patch.tokenReserve = Number(saved.tokenReserve);
+        if (Number.isFinite(Number(saved.actualRlo))) patch.actualRlo = Number(saved.actualRlo);
         if (index >= 0) {
           next[index] = { ...next[index], ...patch, createdAt: patch.createdAt || next[index].createdAt, updatedAt: patch.updatedAt || next[index].updatedAt };
         } else if (saved.state && saved.mint) {

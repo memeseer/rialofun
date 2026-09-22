@@ -88,7 +88,31 @@ async function handleImage(request, env, url) {
 async function handleMetadata(request, env) {
   const db = requireBinding(env, "DB");
   if (request.method === "GET") {
-    const { results } = await db.prepare("SELECT id, state, mint, name, ticker, creator, image_url AS image, created_at AS createdAt, updated_at AS updatedAt FROM markets ORDER BY updated_at DESC LIMIT 500").all();
+    const { results } = await db.prepare(`WITH
+      volumes AS (
+        SELECT market_id, SUM(rlo_amount) AS volume_rlo
+        FROM trades WHERE verified=1 GROUP BY market_id
+      ),
+      balances AS (
+        SELECT market_id, account,
+          SUM(CASE WHEN side='BUY' THEN token_amount ELSE -token_amount END) AS balance
+        FROM trades WHERE verified=1 AND token_amount IS NOT NULL
+        GROUP BY market_id, account
+      ),
+      holder_counts AS (
+        SELECT market_id, COUNT(*) AS holders FROM balances WHERE balance>0 GROUP BY market_id
+      )
+      SELECT m.id,m.state,m.mint,m.name,m.ticker,m.creator,m.image_url AS image,
+        m.created_at AS createdAt,m.updated_at AS updatedAt,
+        s.phase,s.virtual_rlo AS virtualRlo,s.token_reserve AS tokenReserve,
+        s.actual_rlo AS actualRlo,
+        COALESCE(v.volume_rlo,0) AS volumeRlo,
+        COALESCE(h.holders,0) AS holders
+      FROM markets m
+      LEFT JOIN market_snapshots s ON s.state=m.state
+      LEFT JOIN volumes v ON v.market_id=m.id
+      LEFT JOIN holder_counts h ON h.market_id=m.id
+      ORDER BY m.updated_at DESC LIMIT 500`).all();
     return json({ markets: results }, { headers: { "cache-control": "public, max-age=15" } });
   }
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -209,7 +233,10 @@ export default {
         ctx.waitUntil(runIndexer(env).catch(() => undefined));
         return withCors(await handleOnchainMarkets());
       }
-      if (url.pathname === "/api/metadata") return withCors(await handleMetadata(request, env));
+      if (url.pathname === "/api/metadata") {
+        if (request.method === "GET") ctx.waitUntil(runIndexer(env).catch(() => undefined));
+        return withCors(await handleMetadata(request, env));
+      }
       if (url.pathname === "/api/images" || url.pathname.startsWith("/api/images/")) return withCors(await handleImage(request, env, url) || new Response("Not found", { status: 404 }));
       if (url.pathname === "/api/trades" || /\/api\/markets\/[^/]+\/trades$/.test(url.pathname) || /\/api\/markets\/[^/]+\/(holders|candles)$/.test(url.pathname)) return withCors(await handleTrades(request, env, url) || new Response("Not found", { status: 404 }));
     } catch (error) {
