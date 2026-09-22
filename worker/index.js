@@ -196,7 +196,7 @@ async function handleTrades(request, env, url) {
       MIN(price) AS low, MAX(price) AS high,
       (SELECT price FROM trades t2 WHERE t2.market_id=t.market_id AND t2.verified=1 AND CAST(t2.block_time / ? AS INTEGER)=CAST(t.block_time / ? AS INTEGER) ORDER BY t2.block_time ASC LIMIT 1) AS open,
       (SELECT price FROM trades t3 WHERE t3.market_id=t.market_id AND t3.verified=1 AND CAST(t3.block_time / ? AS INTEGER)=CAST(t.block_time / ? AS INTEGER) ORDER BY t3.block_time DESC LIMIT 1) AS close,
-      COUNT(*) AS volume
+      SUM(rlo_amount) AS volume
       FROM trades t WHERE market_id=? AND verified=1 GROUP BY CAST(block_time / ? AS INTEGER) ORDER BY time DESC LIMIT ?`)
       .bind(interval, interval, interval, interval, interval, interval, marketId, interval, limit).all();
     return json({ candles: results.reverse() }, { headers: { "cache-control": "public, max-age=10" } });

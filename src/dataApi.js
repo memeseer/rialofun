@@ -68,6 +68,24 @@ export async function fetchMarketTrades(marketId, state) {
   return Array.isArray(payload.trades) ? payload.trades : [];
 }
 
+const CANDLE_INTERVALS = {
+  "1m": 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+};
+
+export async function fetchMarketCandles(marketId, state, range = "5m") {
+  const params = new URLSearchParams({
+    interval: String(CANDLE_INTERVALS[range] || CANDLE_INTERVALS["5m"]),
+    limit: "180",
+  });
+  if (state) params.set("state", state);
+  const payload = await api(`/api/markets/${encodeURIComponent(marketId)}/candles?${params}`);
+  return Array.isArray(payload.candles) ? payload.candles : [];
+}
+
 export async function fetchMarketMetadata() {
   const payload = await api("/api/metadata");
   return Array.isArray(payload.markets) ? payload.markets.map((market) => ({ ...market, image: versionedImageUrl(market.image, market.updatedAt) })) : [];

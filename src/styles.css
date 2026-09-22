@@ -43,6 +43,19 @@
 .detail-route .chart-range button:first-child{color:#8e9990;background:transparent}
 .detail-route .chart-range button.active{color:#0a0c0a;background:#a8ff65}
 .theme-light.token-route .chart-range button.active{color:#f7f3e9;background:#315b31}
+.detail-route .candle-chart{height:auto;min-height:365px}
+.detail-route .candle-chart .chart-head{min-height:58px}
+.detail-route .candle-chart .chart-head>div:first-child{min-width:150px}
+.ohlc-strip{display:flex!important;grid-auto-flow:column;grid-template-columns:none!important;align-items:center;justify-content:flex-end;gap:12px;min-width:0;font:10px "DM Mono",monospace;font-variant-numeric:tabular-nums}
+.ohlc-strip span{white-space:nowrap}.ohlc-strip b{color:#dfe7df;font-weight:500}.theme-light.token-route .ohlc-strip b{color:#171914}
+.detail-route .token-chart .candle-stage{height:260px;background:linear-gradient(180deg,rgba(255,255,255,.015),transparent)}
+.detail-route .token-chart .candle-stage svg{display:block;width:100%;height:260px;padding:0;background:none;overflow:visible}
+.candle-grid line,.volume-divider{stroke:#ffffff0d;stroke-width:1;vector-effect:non-scaling-stroke}.candle-grid text,.time-label{fill:#69736c;font:9px "DM Mono",monospace;font-variant-numeric:tabular-nums}.theme-light.token-route .candle-grid line,.theme-light.token-route .volume-divider{stroke:#17191414}.theme-light.token-route .candle-grid text,.theme-light.token-route .time-label{fill:#70756c}
+.candle-wick{stroke-width:1.4;vector-effect:non-scaling-stroke}.candle-up .candle-wick{stroke:#72d88a}.candle-up .candle-body{fill:#72d88a;stroke:#72d88a}.candle-down .candle-wick{stroke:#ff7272}.candle-down .candle-body{fill:#0d100f;stroke:#ff7272;stroke-width:1.4;vector-effect:non-scaling-stroke}.candle-up .volume-bar{fill:#72d88a55}.candle-down .volume-bar{fill:#ff727255}.theme-light.token-route .candle-up .candle-wick{stroke:#26763d}.theme-light.token-route .candle-up .candle-body{fill:#26763d;stroke:#26763d}.theme-light.token-route .candle-down .candle-wick{stroke:#bd3d3d}.theme-light.token-route .candle-down .candle-body{fill:#fffdf7;stroke:#bd3d3d}.theme-light.token-route .candle-up .volume-bar{fill:#26763d44}.theme-light.token-route .candle-down .volume-bar{fill:#bd3d3d44}
+.candle-hit{fill:transparent;pointer-events:all}.candle-crosshair{stroke:#a8ff6580;stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke;pointer-events:none}.theme-light.token-route .candle-crosshair{stroke:#315b3180}
+.chart-empty{height:260px;display:grid;place-content:center;gap:5px;text-align:center;color:#dce4dc;background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);background-size:100% 48px,90px 100%}.chart-empty span{color:#7d8780;font:11px "DM Mono",monospace}.theme-light.token-route .chart-empty{color:#171914;background-image:linear-gradient(#1719140b 1px,transparent 1px),linear-gradient(90deg,#1719140b 1px,transparent 1px)}
+.chart-range button:focus-visible{outline:2px solid #a8ff65;outline-offset:2px}.theme-light.token-route .chart-range button:focus-visible{outline-color:#315b31}
+@media(max-width:700px){.ohlc-strip{width:100%;justify-content:flex-start;overflow:auto;padding-bottom:2px}.detail-route .candle-chart .chart-head{align-items:flex-start;flex-direction:column}.detail-route .token-chart .candle-stage,.detail-route .token-chart .candle-stage svg,.chart-empty{height:210px}.detail-route .chart-range button{min-width:42px;min-height:36px;padding:6px 10px}.candle-grid text{font-size:8px}}
 
 /* RialoFun design polish: a restrained terminal/editorial system. */
 :root{

@@ -36,6 +36,7 @@ import {
 } from "./rialoSettlement.js";
 import {
   fetchMarketMetadata,
+  fetchMarketCandles,
   fetchMarketTrades,
   publishMarketMetadata,
   publishTrade,
@@ -172,6 +173,8 @@ export function App() {
   const [pending, setPending] = useState(false);
   const [chartRange, setChartRange] = useState("5m");
   const [confirmedTrades, setConfirmedTrades] = useState([]);
+  const [candles, setCandles] = useState([]);
+  const [candlesLoading, setCandlesLoading] = useState(false);
   const selected = markets.find((market) => market.id === tradeId) ?? null;
   useEffect(() => { if (detailRoute && tradeId && markets.length && !selected) window.location.hash = "explore"; }, [detailRoute, tradeId, markets, selected]);
   useEffect(() => {
@@ -187,6 +190,30 @@ export function App() {
       setConfirmedTrades([...merged.values()].sort((a, b) => Number(b.time) - Number(a.time)));
     }).catch(() => undefined);
   }, [selected?.id]);
+  useEffect(() => {
+    if (!selected) {
+      setCandles([]);
+      return undefined;
+    }
+    let active = true;
+    const refresh = async () => {
+      setCandlesLoading(true);
+      try {
+        const indexed = await fetchMarketCandles(selected.id, selected.onchain?.state, chartRange);
+        if (active) setCandles(indexed);
+      } catch {
+        if (active) setCandles([]);
+      } finally {
+        if (active) setCandlesLoading(false);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 12_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [selected?.id, selected?.onchain?.state, chartRange]);
   const tradeQuote = selected
     ? quote(selected, tradeSide, Number(tradeInput))
     : null;
@@ -779,7 +806,7 @@ export function App() {
                 {formatTokenPrice(spotPrice(selected))}
                 <small> per token</small>
               </p>
-              {detailRoute && <TokenChart ticker={selected.ticker} trades={confirmedTrades} price={spotPrice(selected)} range={chartRange} onRangeChange={setChartRange} />}
+              {detailRoute && <TokenChart ticker={selected.ticker} candles={candles} price={spotPrice(selected)} range={chartRange} loading={candlesLoading} onRangeChange={setChartRange} />}
               <div className="metric-grid">
                 <div>
                   <span>Progress</span>
