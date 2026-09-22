@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
+  ArrowSquareOut,
   CaretDown,
   ChartLineUp,
   ImageSquare,
@@ -63,6 +64,18 @@ const compact = (number) =>
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(number);
+
+const shortAddress = (value = "") =>
+  value.length > 13 ? `${value.slice(0, 5)}…${value.slice(-4)}` : value;
+
+const relativeTime = (value) => {
+  const elapsed = Date.now() - Number(value || 0);
+  if (!Number.isFinite(elapsed) || elapsed < 0) return "now";
+  if (elapsed < 60_000) return "now";
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
+  return `${Math.floor(elapsed / 86_400_000)}d`;
+};
 
 function TokenVisual({ market }) {
   const [visibleImage, setVisibleImage] = useState("");
@@ -136,12 +149,63 @@ function MarketCard({ market, onTrade }) {
         <span>Holders&nbsp; {market.holders}</span>
       </div>
       <div className="creator">
-        <i /> Created by&nbsp; {market.creator}
+        <i /> <span>Created by&nbsp;</span>
+        <code title={market.creator}>{shortAddress(market.creator)}</code>
         <button onClick={() => { window.location.hash = `token/${market.id}`; onTrade(market.id); }}>
           Trade <ArrowRight size={14} />
         </button>
       </div>
     </article>
+  );
+}
+
+function TradeHistory({ trades, ticker }) {
+  if (!trades.length)
+    return (
+      <div className="empty-history">
+        <strong>No trades yet</strong>
+        <span>The first confirmed trade will appear here.</span>
+      </div>
+    );
+
+  return (
+    <div className="history-table" role="table" aria-label={`${ticker} confirmed trades`}>
+      <div className="history-row history-head" role="row">
+        <span>Trader</span><span>Side</span><span>Value</span><span>Tokens</span>
+        <span>Price</span><span>Time</span><span aria-label="Transaction" />
+      </div>
+      {trades.map((item) => (
+        <div className="history-row" role="row" key={item.signature}>
+          <span className="history-account" data-label="Trader">
+            <i aria-hidden="true" />
+            <code title={item.account}>{shortAddress(item.account)}</code>
+          </span>
+          <strong data-label="Side" className={`history-side ${item.side === "BUY" ? "is-buy" : "is-sell"}`}>
+            {item.side}
+          </strong>
+          <span data-label="Value" className="history-number">{formatRlo(Number(item.rloAmount))}</span>
+          <span data-label="Tokens" className="history-number">
+            {item.tokenAmount ? `${compact(Number(item.tokenAmount))} ${ticker}` : "Pending index"}
+          </span>
+          <span data-label="Price" className="history-number">
+            {Number(item.price) > 0 ? formatTokenPrice(Number(item.price)) : "—"}
+          </span>
+          <time data-label="Time" dateTime={new Date(Number(item.time)).toISOString()} title={new Date(Number(item.time)).toLocaleString()}>
+            {relativeTime(item.time)}
+          </time>
+          <a
+            className="history-tx"
+            href={`https://rialo-explorer-testnet-direct.vercel.app/txs/${item.signature}`}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${shortAddress(item.signature)} in Rialo explorer`}
+            title="Open transaction in Rialo explorer"
+          >
+            <ArrowSquareOut size={16} weight="bold" />
+          </a>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -864,8 +928,11 @@ export function App() {
               {selected.onchain && selected.phase === "pool" && <button className="button ghost" disabled={pending || !wallet} onClick={() => setLiquidityOpen(value => !value)}>{liquidityOpen ? "Close liquidity" : "Manage liquidity"}</button>}
               {liquidityOpen && <section className="liquidity-panel"><div><button className={liquiditySide === "add" ? "active" : ""} onClick={() => setLiquiditySide("add")}>Add</button><button className={liquiditySide === "remove" ? "active" : ""} onClick={() => setLiquiditySide("remove")}>Remove</button></div><input value={liquidityRlo} onChange={event => setLiquidityRlo(event.target.value)} placeholder="RLO amount"/><input value={liquidityToken} onChange={event => setLiquidityToken(event.target.value)} placeholder={liquiditySide === "add" ? "Token amount" : "LP amount"}/><button className="button primary" disabled={pending} onClick={applyLiquidity}>{pending ? "Waiting for wallet…" : `${liquiditySide === "add" ? "Add" : "Remove"} liquidity`}</button></section>}
               <section className="recent-trades trade-history">
-                <div><b>Confirmed trades</b><span>Testnet</span></div>
-                {confirmedTrades.length ? <div className="history-table"><div className="history-row history-head"><span>Account</span><span>Type</span><span>Amount</span><span>Time</span><span>Tx</span></div>{confirmedTrades.map(item => <div className="history-row" key={item.signature}><code>{item.account.slice(0,5)}…{item.account.slice(-4)}</code><strong className={item.side === "BUY" ? "positive" : "negative"}>{item.side}</strong><span>{item.rloAmount} RLO</span><time>{new Date(item.time).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</time><a href={`https://rialo-explorer-testnet-direct.vercel.app/txs/${item.signature}`} target="_blank" rel="noreferrer">↗</a></div>)}</div> : <p className="empty-history">No confirmed trades indexed yet.</p>}
+                <div className="history-title">
+                  <div><b>Market activity</b><span>Confirmed on Rialo testnet</span></div>
+                  <small>{confirmedTrades.length} trades</small>
+                </div>
+                <TradeHistory trades={confirmedTrades} ticker={selected.ticker} />
               </section>
             </div>
             <div className="trade-panel">

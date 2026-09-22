@@ -100,3 +100,48 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 .theme-dark .trend-item:hover,.theme-dark .market-card:hover{box-shadow:0 12px 30px rgba(0,0,0,.24)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
 @media(max-width:620px){.hero::after{display:none}.ticker{overflow-x:auto}.ticker span{min-width:150px}.market-card:hover,.trend-item:hover{transform:none}}
+
+/* Stable market grid. Long on-chain addresses must never define track width. */
+.market-grid{grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch}
+.market-card{min-width:0;width:100%;display:flex;flex-direction:column;overflow:hidden}
+.market-card .creator{min-width:0;margin-top:auto}
+.market-card .creator>span{flex:0 0 auto}
+.market-card .creator code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;font:inherit}
+.market-card .creator button{flex:0 0 auto;margin-left:auto}
+.market-card .card-meta{flex-wrap:wrap}
+
+/* Trading history: dense enough for scanning, quiet enough for the chart. */
+.detail-route .trade-history{margin-top:22px;border:1px solid #242a27;border-radius:12px;overflow:hidden;background:#0d100f}
+.detail-route .trade-history>div:first-child{border:0}
+.detail-route .history-title{min-height:62px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #242a27}
+.detail-route .history-title>div{display:grid;gap:3px}
+.detail-route .history-title b{font-size:14px;color:#eef3ed}
+.detail-route .history-title span,.detail-route .history-title small{color:#7f8981;font:10px "DM Mono",monospace}
+.detail-route .history-title small{padding:5px 8px;border:1px solid #2c332f;border-radius:999px}
+.detail-route .history-table{border:0;border-radius:0;overflow:hidden}
+.detail-route .history-row{grid-template-columns:minmax(112px,1.15fr) 66px minmax(100px,.95fr) minmax(105px,1.05fr) minmax(105px,1fr) 48px 34px;gap:10px;min-height:48px;padding:9px 14px;border-top:1px solid #202622;font-size:10px;font-variant-numeric:tabular-nums}
+.detail-route .history-head{min-height:36px;color:#7f8981;background:#121714;font-size:9px;letter-spacing:.25px;text-transform:uppercase}
+.detail-route .history-account{min-width:0;display:flex;align-items:center;gap:7px}
+.detail-route .history-account i{width:20px;height:20px;flex:0 0 auto;border-radius:50%;background:radial-gradient(circle at 35% 30%,#b9ff7e,#315b31 60%,#142216);box-shadow:0 0 0 1px #334139}
+.detail-route .history-account code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.detail-route .history-side{width:max-content;padding:4px 7px;border-radius:4px;font-size:9px;letter-spacing:.4px}
+.detail-route .history-side.is-buy{color:#a8ff65;background:#a8ff6512;border:1px solid #a8ff6530}
+.detail-route .history-side.is-sell{color:#ff7b77;background:#ff7b7710;border:1px solid #ff7b7730}
+.detail-route .history-number{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dce4dc}
+.detail-route .history-row time{color:#8f9991}
+.detail-route .history-tx{width:30px;height:30px;display:grid;place-items:center;border:1px solid #2d3530;border-radius:6px;color:#a8ff65!important;transition:background .18s ease,border-color .18s ease}
+.detail-route .history-tx:hover{border-color:#a8ff65;background:#a8ff6510}
+.detail-route .empty-history{min-height:118px;padding:28px 16px!important;display:grid;place-content:center;gap:5px;text-align:center}
+.detail-route .empty-history strong{color:#dce4dc;font-size:12px}
+.detail-route .empty-history span{color:#7d8780;font:10px "DM Mono",monospace}
+.theme-light.token-route .trade-history{border-color:#d2cdc0;background:#fffdf7}
+.theme-light.token-route .history-title{border-color:#d2cdc0}
+.theme-light.token-route .history-title b,.theme-light.token-route .empty-history strong{color:#171914}
+.theme-light.token-route .history-title span,.theme-light.token-route .history-title small{color:#62685e}
+.theme-light.token-route .history-title small,.theme-light.token-route .history-tx{border-color:#d2cdc0}
+.theme-light.token-route .history-row{border-color:#e2ddd2}
+.theme-light.token-route .history-number{color:#272b26}
+
+@media(max-width:1080px){.market-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:800px){.market-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-route .history-table{padding:8px}.detail-route .history-head{display:none}.detail-route .history-row:not(.history-head){grid-template-columns:1fr 1fr auto;gap:10px 14px;margin:8px 0;padding:13px;border:1px solid #242a27;border-radius:9px}.detail-route .history-row [data-label]::before{content:attr(data-label);display:block;margin-bottom:4px;color:#748078;font:8px "DM Mono",monospace;text-transform:uppercase}.detail-route .history-account{grid-column:1}.detail-route .history-side{grid-column:2}.detail-route .history-tx{grid-column:3;grid-row:1}.detail-route .history-number{white-space:normal}.detail-route .history-row time{grid-column:2}.theme-light.token-route .history-row:not(.history-head){border-color:#d2cdc0}}
+@media(max-width:560px){.market-grid{grid-template-columns:1fr}.detail-route .history-row:not(.history-head){grid-template-columns:1fr 1fr}.detail-route .history-tx{grid-column:2;grid-row:1;justify-self:end}}
