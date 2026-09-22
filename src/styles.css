@@ -118,7 +118,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 .detail-route .history-title b{font-size:14px;color:#eef3ed}
 .detail-route .history-title span,.detail-route .history-title small{color:#7f8981;font:10px "DM Mono",monospace}
 .detail-route .history-title small{padding:5px 8px;border:1px solid #2c332f;border-radius:999px}
-.detail-route .history-table{border:0;border-radius:0;overflow:hidden}
+.detail-route .history-table{display:block;border:0;border-radius:0;overflow:hidden}
 .detail-route .history-row{grid-template-columns:minmax(112px,1.15fr) 66px minmax(100px,.95fr) minmax(105px,1.05fr) minmax(105px,1fr) 48px 34px;gap:10px;min-height:48px;padding:9px 14px;border-top:1px solid #202622;font-size:10px;font-variant-numeric:tabular-nums}
 .detail-route .history-head{min-height:36px;color:#7f8981;background:#121714;font-size:9px;letter-spacing:.25px;text-transform:uppercase}
 .detail-route .history-account{min-width:0;display:flex;align-items:center;gap:7px}
