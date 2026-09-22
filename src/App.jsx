@@ -244,7 +244,7 @@ export function App() {
     void discoverOnchainMarkets().then((found) => setMarkets((current) => { const byState = new Map(found.map(item => [item.onchain.state, item])); return current.map(item => byState.get(item.onchain?.state) ? { ...item, ...byState.get(item.onchain.state) } : item).concat(found.filter(item => !current.some(existing => existing.onchain?.state === item.onchain.state))); })).catch(() => undefined);
   }, [wallet]);
   useEffect(() => {
-    void fetchMarketMetadata().then((metadata) => setMarkets((current) => {
+    const hydrateSharedMetadata = () => fetchMarketMetadata().then((metadata) => setMarkets((current) => {
       const next = [...current];
       for (const saved of metadata) {
         const index = next.findIndex((market) => market.id === saved.id || market.onchain?.state === saved.state);
@@ -269,6 +269,9 @@ export function App() {
       }
       return next;
     })).catch(() => undefined);
+    void hydrateSharedMetadata();
+    const timer = window.setInterval(hydrateSharedMetadata, 12_000);
+    return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
     const pending = loadOnchainMarkets().filter((market) => typeof market.image === "string" && market.image.startsWith("data:"));
