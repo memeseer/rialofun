@@ -270,6 +270,21 @@ export function App() {
       return next;
     })).catch(() => undefined);
   }, []);
+  useEffect(() => {
+    const pending = loadOnchainMarkets().filter((market) => typeof market.image === "string" && market.image.startsWith("data:"));
+    if (!pending.length) return;
+    void Promise.all(pending.map(async (market) => {
+      try {
+        const image = await uploadTokenImage(market.image);
+        const synced = { ...market, image, updatedAt: Date.now() };
+        saveOnchainMarket(synced);
+        await publishMarketMetadata(synced);
+        setMarkets((current) => current.map((item) => item.id === synced.id ? { ...item, image, updatedAt: synced.updatedAt } : item));
+      } catch {
+        // Retry on the next load; the local data URI remains available in this browser.
+      }
+    }));
+  }, []);
 
   const launch = async (event) => {
     event.preventDefault();
