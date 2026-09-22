@@ -74,9 +74,13 @@ async function handleImage(request, env, url) {
       headers.set("cache-control", "public, max-age=31536000, immutable");
       return new Response(object.body, { headers });
     }
-    const object = await db.prepare("SELECT content_type AS contentType,body FROM images WHERE key=?").bind(key).first();
-    if (!object) return new Response("Not found", { status: 404 });
-    return new Response(object.body, { headers: { "content-type": object.contentType, "cache-control": "public, max-age=31536000, immutable" } });
+    // D1's BLOB values are not reliable as a Response body when returned
+    // directly. Read the bytes as hex so the edge runtime preserves them.
+    const object = await db.prepare("SELECT content_type AS contentType,hex(body) AS encoded FROM images WHERE key=?").bind(key).first();
+    if (!object?.encoded) return new Response("Not found", { status: 404 });
+    const bytes = new Uint8Array(object.encoded.length / 2);
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Number.parseInt(object.encoded.slice(index * 2, index * 2 + 2), 16);
+    return new Response(bytes, { headers: { "content-type": object.contentType, "content-length": String(bytes.byteLength), "cache-control": "public, max-age=31536000, immutable" } });
   }
   return null;
 }
