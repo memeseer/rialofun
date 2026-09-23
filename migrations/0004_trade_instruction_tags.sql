@@ -1,0 +1,1 @@
+ALTER TABLE trades ADD COLUMN instruction_tag INTEGER NOT NULL DEFAULT -1;

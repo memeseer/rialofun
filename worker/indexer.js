@@ -2,6 +2,10 @@ export const PROGRAM_ID = "2iquqTG5Frnj64kzwa5RFWawuJpXg3fYhMkTPiT22AiM";
 const TOKEN_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const RPC_URL = "https://testnet.rialo.io:4101";
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const INITIAL_VIRTUAL_RLO = 30_000_000_000n;
+const INITIAL_TOKEN_RESERVE = 1_000_000_000_000_000n;
+const BPS_DENOMINATOR = 10_000n;
+const CURVE_FEE_BPS = 100n;
 
 function decodeBase58(value = "") {
   let number = 0n;
@@ -90,6 +94,61 @@ export function receivedRloFromTransaction(transaction, traderIndex) {
   return Number(received > 0n ? received : 0n) / 1e9;
 }
 
+function curveFee(amount) {
+  return (amount * CURVE_FEE_BPS + BPS_DENOMINATOR - 1n) / BPS_DENOMINATOR;
+}
+
+function replayCurveTrades(rows) {
+  let virtualRlo = INITIAL_VIRTUAL_RLO;
+  let tokenReserve = INITIAL_TOKEN_RESERVE;
+  const sells = [];
+  for (const row of rows) {
+    if (Number(row.instruction_tag) >= 3) continue;
+    if (row.side === "BUY") {
+      const rloIn = BigInt(Math.round(Number(row.rlo_amount) * 1e9));
+      if (rloIn <= 0n) continue;
+      const nextRlo = virtualRlo + rloIn - curveFee(rloIn);
+      const nextTokens = (virtualRlo * tokenReserve) / nextRlo;
+      if (nextTokens <= 0n || nextTokens >= tokenReserve) continue;
+      virtualRlo = nextRlo;
+      tokenReserve = nextTokens;
+      continue;
+    }
+    const tokensIn = BigInt(Math.round(Number(row.token_amount) * 1e6));
+    if (tokensIn <= 0n) continue;
+    const nextTokens = tokenReserve + tokensIn;
+    const nextRlo = (virtualRlo * tokenReserve) / nextTokens;
+    const grossRloOut = virtualRlo - nextRlo;
+    const rloOut = grossRloOut - curveFee(grossRloOut);
+    if (rloOut <= 0n) continue;
+    sells.push({ signature: row.signature, rloOut });
+    virtualRlo = nextRlo;
+    tokenReserve = nextTokens;
+  }
+  return { virtualRlo, tokenReserve, sells };
+}
+
+async function repairMissingCurveSellValues(db) {
+  const { results: markets } = await db.prepare(`SELECT DISTINCT market_id AS marketId FROM trades
+    WHERE verified=1 AND side='SELL' AND rlo_amount=0 AND instruction_tag IN (-1,2)`).all();
+  let repaired = 0;
+  for (const { marketId } of markets) {
+    const { results: rows } = await db.prepare(`SELECT signature,side,rlo_amount,token_amount,instruction_tag
+      FROM trades WHERE market_id=? AND verified=1 ORDER BY block_time ASC,signature ASC`).bind(marketId).all();
+    const { sells } = replayCurveTrades(rows);
+    const missing = new Set(rows.filter((row) => row.side === "SELL" && Number(row.rlo_amount) === 0 && [-1, 2].includes(Number(row.instruction_tag))).map((row) => row.signature));
+    const updates = sells.filter((sell) => missing.has(sell.signature)).map((sell) => {
+      const row = rows.find((item) => item.signature === sell.signature);
+      const rloAmount = Number(sell.rloOut) / 1e9;
+      return db.prepare("UPDATE trades SET rlo_amount=?,price=? WHERE signature=? AND rlo_amount=0")
+        .bind(rloAmount, rloAmount / Number(row.token_amount), sell.signature).run();
+    });
+    await Promise.all(updates);
+    repaired += updates.length;
+  }
+  return repaired;
+}
+
 function instructionEvent(instruction, keys) {
   if (keys[instruction.programIdIndex] !== PROGRAM_ID) return null;
   const data = decodeBase58(instruction.data || "");
@@ -131,15 +190,23 @@ async function indexTransaction(db, item) {
     // inner mint, burn or transfer instruction instead of guessing an amount.
     if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) throw new Error(`Missing token balance delta for ${item.signature}.`);
     const amount = Number(readU128(event.data, 1)) / (isBuy ? 1e9 : 1e6);
-    const rloAmount = isBuy ? amount : receivedRloFromTransaction(transaction, event.traderIndex);
-    // Some Rialo transactions omit native balance arrays. Record a verified
-    // sell with unknown RLO value, without blocking all later signatures.
-    if (isBuy && (!Number.isFinite(rloAmount) || rloAmount <= 0)) throw new Error(`Missing RLO amount for ${item.signature}.`);
+    let rloAmount = isBuy ? amount : receivedRloFromTransaction(transaction, event.traderIndex);
+    if (!isBuy && rloAmount <= 0 && event.tag === 2) {
+      const { results: previousTrades } = await db.prepare(`SELECT signature,side,rlo_amount,token_amount,instruction_tag
+        FROM trades WHERE market_id=? AND verified=1 ORDER BY block_time ASC,signature ASC`).bind(marketId).all();
+      const { virtualRlo, tokenReserve } = replayCurveTrades(previousTrades);
+      const tokensIn = tokenDeltaBase;
+      const nextTokens = tokenReserve + tokensIn;
+      const nextRlo = (virtualRlo * tokenReserve) / nextTokens;
+      const grossRloOut = virtualRlo - nextRlo;
+      rloAmount = Number(grossRloOut - curveFee(grossRloOut)) / 1e9;
+    }
+    if (event.tag === 2 && (!Number.isFinite(rloAmount) || rloAmount <= 0)) throw new Error(`Could not recover RLO amount for ${item.signature}.`);
     const side = isBuy ? "BUY" : "SELL";
     const price = rloAmount > 0 ? rloAmount / tokenAmount : 0;
-    await db.prepare(`INSERT INTO trades (signature,market_id,account,side,rlo_amount,token_amount,price,block_time,verified)
-      VALUES (?,?,?,?,?,?,?,?,1) ON CONFLICT(signature) DO UPDATE SET market_id=excluded.market_id,account=excluded.account,side=excluded.side,rlo_amount=excluded.rlo_amount,token_amount=excluded.token_amount,price=excluded.price,block_time=excluded.block_time,verified=1`)
-      .bind(item.signature, marketId, event.trader || "On-chain", side, rloAmount, tokenAmount, price, time).run();
+    await db.prepare(`INSERT INTO trades (signature,market_id,account,side,rlo_amount,token_amount,price,block_time,verified,instruction_tag)
+      VALUES (?,?,?,?,?,?,?,?,1,?) ON CONFLICT(signature) DO UPDATE SET market_id=excluded.market_id,account=excluded.account,side=excluded.side,rlo_amount=excluded.rlo_amount,token_amount=excluded.token_amount,price=excluded.price,block_time=excluded.block_time,verified=1,instruction_tag=excluded.instruction_tag`)
+      .bind(item.signature, marketId, event.trader || "On-chain", side, rloAmount, tokenAmount, price, time, event.tag).run();
     await db.prepare("UPDATE markets SET updated_at=? WHERE id=?").bind(time, marketId).run();
     trades += 1;
   }
@@ -152,6 +219,7 @@ async function indexTransaction(db, item) {
 
 export async function runIndexer(env) {
   if (!env.DB) throw new Error("D1 binding is not configured.");
+  await repairMissingCurveSellValues(env.DB);
   const cursor = await env.DB.prepare("SELECT value FROM indexer_state WHERE key='latest_signature'").first();
   const config = { limit: 50 };
   if (cursor?.value) config.until = cursor.value;
