@@ -16,6 +16,8 @@ const PRICE_TOP = 16;
 const PRICE_BOTTOM = 190;
 const VOLUME_TOP = 210;
 const VOLUME_BOTTOM = 244;
+const INTERVAL_MS = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000 };
+const MAX_CANDLES = 180;
 
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
@@ -35,7 +37,7 @@ function formatTime(value, range) {
   return new Date(finite(value)).toLocaleString([], options);
 }
 
-function normalizeCandles(candles, price) {
+function normalizeCandles(candles) {
   const normalized = candles
     .map((item) => ({
       time: finite(item.time),
@@ -51,10 +53,12 @@ function normalizeCandles(candles, price) {
   return normalized;
 }
 
-export function TokenChart({ ticker, candles, price, range, loading, error, onRangeChange }) {
-  const series = useMemo(() => normalizeCandles(candles, price), [candles, price]);
+export function TokenChart({ ticker, candles, range, loading, error, onRangeChange }) {
+  const series = useMemo(() => normalizeCandles(candles), [candles]);
   const [hovered, setHovered] = useState(null);
-  useEffect(() => setHovered(null), [range, series.length]);
+  const firstCandleTime = series[0]?.time;
+  const lastCandleTime = series.at(-1)?.time;
+  useEffect(() => setHovered(null), [range, series.length, firstCandleTime, lastCandleTime]);
 
   const geometry = useMemo(() => {
     if (!series.length) return null;
@@ -65,17 +69,28 @@ export function TokenChart({ ticker, candles, price, range, loading, error, onRa
     const high = rawHigh + padding;
     const spread = high - low || 1;
     const plotWidth = WIDTH - LEFT - RIGHT;
-    const slot = plotWidth / series.length;
-    const bodyWidth = clamp(slot * 0.58, 3, 18);
-    const maxVolume = Math.max(...series.map((item) => item.volume), 1);
+    const interval = INTERVAL_MS[range] || INTERVAL_MS["5m"];
+    const firstTime = series[0].time;
+    const lastTime = series.at(-1).time;
+    const hasTimeSpan = lastTime > firstTime;
+    const domainStart = firstTime;
+    const domainEnd = hasTimeSpan ? lastTime + interval : firstTime + interval * MAX_CANDLES;
+    const domainSpan = domainEnd - domainStart;
+    const slot = plotWidth * interval / domainSpan;
+    const bodyWidth = clamp(slot * 0.68, 3, 18);
+    const greatestVolume = Math.max(...series.map((item) => item.volume), 0);
+    const maxVolume = greatestVolume > 0 ? greatestVolume : 1;
     const y = (value) => PRICE_BOTTOM - ((value - low) / spread) * (PRICE_BOTTOM - PRICE_TOP);
     return {
       low,
       high,
       bodyWidth,
+      interval,
       points: series.map((item, index) => ({
         ...item,
-        x: LEFT + slot * index + slot / 2,
+        x: hasTimeSpan
+          ? LEFT + ((item.time + interval / 2 - domainStart) / domainSpan) * plotWidth
+          : LEFT + plotWidth / 2,
         openY: y(item.open),
         highY: y(item.high),
         lowY: y(item.low),
@@ -83,7 +98,7 @@ export function TokenChart({ ticker, candles, price, range, loading, error, onRa
         volumeY: VOLUME_BOTTOM - (item.volume / maxVolume) * (VOLUME_BOTTOM - VOLUME_TOP),
       })),
     };
-  }, [series]);
+  }, [series, range]);
 
   const active = hovered == null ? series.at(-1) : series[hovered];
   const activeDirection = active && active.close >= active.open ? "Up" : "Down";
@@ -135,6 +150,9 @@ export function TokenChart({ ticker, candles, price, range, loading, error, onRa
                   className={rising ? "candle candle-up" : "candle candle-down"}
                   key={`${item.time}-${index}`}
                   onMouseEnter={() => setHovered(index)}
+                  onFocus={() => setHovered(index)}
+                  tabIndex="0"
+                  aria-label={`${formatTime(item.time, range)} ${rising ? "up" : "down"} candle, open ${formatPrice(item.open)}, high ${formatPrice(item.high)}, low ${formatPrice(item.low)}, close ${formatPrice(item.close)}, volume ${item.volume.toFixed(4)} RLO`}
                 >
                   <title>{`${formatTime(item.time, range)} · ${rising ? "Up" : "Down"} · O ${formatPrice(item.open)} · H ${formatPrice(item.high)} · L ${formatPrice(item.low)} · C ${formatPrice(item.close)} · Vol ${item.volume.toFixed(4)} RLO`}</title>
                   <line className="candle-wick" x1={item.x} x2={item.x} y1={item.highY} y2={item.lowY} />
@@ -147,11 +165,18 @@ export function TokenChart({ ticker, candles, price, range, loading, error, onRa
             {hovered != null && geometry.points[hovered] && (
               <line className="candle-crosshair" x1={geometry.points[hovered].x} x2={geometry.points[hovered].x} y1={PRICE_TOP} y2={VOLUME_BOTTOM} />
             )}
-            {geometry.points.length > 1 && [0, Math.floor((geometry.points.length - 1) / 2), geometry.points.length - 1].map((index) => (
-              <text className="time-label" textAnchor={index === 0 ? "start" : index === geometry.points.length - 1 ? "end" : "middle"} x={geometry.points[index].x} y={HEIGHT - 3} key={index}>
-                {formatTime(geometry.points[index].time, range)}
-              </text>
-            ))}
+            {[...new Set([0, Math.floor((geometry.points.length - 1) / 2), geometry.points.length - 1])].map((index) => {
+              const point = geometry.points[index];
+              const anchor = point.x < LEFT + 36 ? "start" : point.x > WIDTH - RIGHT - 36 ? "end" : "middle";
+              return (
+                <g key={`${point.time}-${index}`}>
+                  <line className="time-grid" x1={point.x} x2={point.x} y1={PRICE_TOP} y2={VOLUME_BOTTOM} />
+                  <text className="time-label" textAnchor={anchor} x={point.x} y={HEIGHT - 3}>
+                    {formatTime(point.time, range)}
+                  </text>
+                </g>
+              );
+            })}
           </svg>
         </div>
       ) : (
