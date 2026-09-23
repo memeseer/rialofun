@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 import test from "node:test";
 import worker from "../worker/index.js";
+import { runIndexer } from "../worker/indexer.js";
 
 test("serves existing static assets without a fallback", async () => {
   const calls = [];
@@ -74,7 +75,7 @@ test("stores a bounded token image in the R2 binding", async () => {
   const response = await worker.fetch(new Request("https://example.test/api/images", {
     method: "POST",
     headers: { "content-type": "image/webp" },
-    body: new Uint8Array([82, 73, 70, 70]),
+    body: new Uint8Array([82, 73, 70, 70, 4, 0, 0, 0, 87, 69, 66, 80]),
   }), {
     ASSETS: { fetch: async () => new Response("missing", { status: 404 }) },
     IMAGES: { head: async () => null, put: async (key, body, options) => { stored = { key, body, options }; } },
@@ -84,6 +85,64 @@ test("stores a bounded token image in the R2 binding", async () => {
   assert.equal(response.status, 201);
   assert.match(payload.url, /^\/api\/images\/tokens\/[a-f0-9]{64}\.webp$/);
   assert.equal(stored.options.httpMetadata.contentType, "image/webp");
+});
+
+test("rejects image payloads whose bytes do not match the declared MIME type", async () => {
+  const response = await worker.fetch(new Request("https://example.test/api/images", {
+    method: "POST", headers: { "content-type": "image/webp" }, body: new Uint8Array([1, 2, 3, 4]),
+  }), {
+    ASSETS: { fetch: async () => new Response("missing", { status: 404 }) },
+    IMAGES: { head: async () => null, put: async () => assert.fail("invalid image must not be stored") },
+    DB: { prepare: () => ({ bind: () => ({ run: async () => ({ meta: { changes: 1 } }) }) }) },
+  });
+  assert.equal(response.status, 415);
+});
+
+test("does not accept browser-submitted trade records", async () => {
+  const response = await worker.fetch(new Request("https://example.test/api/trades", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ marketId: "fake", signature: "fake" }),
+  }), { DB: {}, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
+  assert.equal(response.status, 405);
+  assert.match((await response.json()).error, /on-chain indexer/);
+});
+
+test("rejects unsigned metadata before it can overwrite the shared profile", async () => {
+  const queries = [];
+  const DB = { prepare(query) { queries.push(query); return { bind() { return this; }, first: async () => null, run: async () => ({ meta: { changes: 1 } }) }; } };
+  const response = await worker.fetch(new Request("https://example.test/api/metadata", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      id: "chain-abc", state: "state", mint: "mint", name: "Forged", ticker: "FAKE", creator: "11111111111111111111111111111111",
+      image: "/api/images/tokens/fake.webp", launchSignature: "tx", description: "forged", createdAt: 1, signature: "bad",
+    }),
+  }), {
+    DB,
+    IMAGES: { head: async () => ({ key: "tokens/fake.webp" }) },
+    ASSETS: { fetch: async () => new Response("missing", { status: 404 }) },
+  });
+  assert.equal(response.status, 401);
+  assert.equal(queries.some((query) => query.includes("INSERT INTO markets")), false);
+});
+
+test("keeps the indexer watermark unchanged when RPC has not returned a transaction", async () => {
+  const statements = [];
+  const DB = { prepare(query) { statements.push(query); return { bind() { return this; }, first: async () => null, run: async () => ({ meta: { changes: 1 } }) }; } };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const result = body.method === "getSignaturesForAddress"
+      ? { value: [{ signature: "delayed-signature", blockHeight: 4, blockTime: 1_700_000_000 }] }
+      : null;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await runIndexer({ DB });
+    assert.equal(result.indexed, 0);
+    assert.equal(result.failed.signature, "delayed-signature");
+    assert.equal(statements.some((query) => query.includes("latest_signature")), true);
+    assert.equal(statements.filter((query) => query.includes("INSERT OR REPLACE INTO indexer_state")).length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("emits the files required by Sites packaging", async () => {

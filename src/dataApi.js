@@ -4,11 +4,9 @@ const JSON_HEADERS = { "content-type": "application/json" };
 const API_BASE = (import.meta.env.VITE_RIALOFUN_API || "").replace(/\/$/, "");
 const absoluteUrl = (value) => value && value.startsWith("/") ? `${API_BASE}${value}` : value;
 const apiPath = (value) => API_BASE && value?.startsWith(API_BASE) ? value.slice(API_BASE.length) : value;
-const versionedImageUrl = (value, version) => {
-  const resolved = absoluteUrl(value);
-  if (!resolved || !resolved.includes("/api/images/")) return resolved;
-  return `${resolved}${resolved.includes("?") ? "&" : "?"}v=${encodeURIComponent(version || "binary-v2")}`;
-};
+// Image paths are SHA-256 content-addressed and served immutable by the worker.
+// Do not key image cache on market.updatedAt: every trade would trigger a needless reload.
+const versionedImageUrl = (value) => absoluteUrl(value);
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, options);
@@ -36,29 +34,39 @@ export async function uploadTokenImage(dataUrl) {
   return absoluteUrl(payload.url);
 }
 
-export async function publishMarketMetadata(market) {
+export async function publishMarketMetadata(market, walletAccount) {
+  const metadata = {
+    id: market.id,
+    state: market.onchain?.state,
+    mint: market.onchain?.mint,
+    name: market.name,
+    ticker: market.ticker,
+    creator: market.creator,
+    image: apiPath(market.image),
+    description: market.description || "",
+    website: market.website || "",
+    twitter: market.twitter || "",
+    launchSignature: market.onchain?.signature || market.onchain?.launchSignature || "",
+    createdAt: market.createdAt,
+  };
+  const message = createMetadataMessage(metadata);
+  const account = walletAccount || window.rialoTestnetWallet?.accounts?.find((item) => item.address === market.creator);
+  const feature = window.rialoTestnetWallet?.features?.["solana:signMessage"] || window.rialoTestnetWallet?.features?.["rialo:signMessage"];
+  if (!feature || !account) throw new Error("This wallet does not support signing market metadata. Your token is on-chain, but its shared profile is not published.");
+  const result = await feature.signMessage({ account, message: new TextEncoder().encode(message) });
+  const signed = Array.isArray(result) ? result[0] : result;
+  if (!signed?.signature) throw new Error("Wallet did not return a metadata signature.");
+  const signature = btoa(String.fromCharCode(...signed.signature));
   return api("/api/metadata", {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({
-      id: market.id,
-      state: market.onchain?.state,
-      mint: market.onchain?.mint,
-      name: market.name,
-      ticker: market.ticker,
-      creator: market.creator,
-      image: apiPath(market.image),
-      createdAt: market.createdAt,
-    }),
+    body: JSON.stringify({ ...metadata, signature }),
   });
 }
 
-export async function publishTrade(trade) {
-  return api("/api/trades", {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify(trade),
-  });
+export function createMetadataMessage(metadata) {
+  return JSON.stringify(["RialoFun metadata authorization v1", metadata.id, metadata.state, metadata.mint, metadata.creator,
+    metadata.launchSignature, metadata.name, metadata.ticker, metadata.image, metadata.description, metadata.website, metadata.twitter, metadata.createdAt]);
 }
 
 export async function fetchMarketTrades(marketId, state) {
@@ -88,5 +96,5 @@ export async function fetchMarketCandles(marketId, state, range = "5m") {
 
 export async function fetchMarketMetadata() {
   const payload = await api("/api/metadata");
-  return Array.isArray(payload.markets) ? payload.markets.map((market) => ({ ...market, image: versionedImageUrl(market.image, market.updatedAt) })) : [];
+  return Array.isArray(payload.markets) ? payload.markets.map((market) => ({ ...market, image: versionedImageUrl(market.image) })) : [];
 }

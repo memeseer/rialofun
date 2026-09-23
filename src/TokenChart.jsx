@@ -48,8 +48,7 @@ function normalizeCandles(candles, price) {
     .filter((item) => item.time && item.open > 0 && item.high > 0 && item.low > 0 && item.close > 0)
     .sort((left, right) => left.time - right.time);
 
-  if (normalized.length || !(price > 0)) return normalized;
-  return [{ time: Date.now(), open: price, high: price, low: price, close: price, volume: 0 }];
+  return normalized;
 }
 
 export function TokenChart({ ticker, candles, price, range, loading, onRangeChange }) {

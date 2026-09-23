@@ -146,3 +146,37 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(-
 @media(max-width:1100px){.detail-route .history-table{padding:8px}.detail-route .history-head{display:none}.detail-route .history-row:not(.history-head){grid-template-columns:1fr 1fr auto;gap:10px 14px;margin:8px 0;padding:13px;border:1px solid #242a27;border-radius:9px}.detail-route .history-row [data-label]::before{content:attr(data-label);display:block;margin-bottom:4px;color:#748078;font:8px "DM Mono",monospace;text-transform:uppercase}.detail-route .history-account{grid-column:1}.detail-route .history-side{grid-column:2}.detail-route .history-tx{grid-column:3;grid-row:1}.detail-route .history-number{white-space:normal}.detail-route .history-row time{grid-column:2}.theme-light.token-route .history-row:not(.history-head){border-color:#d2cdc0}}
 @media(max-width:800px){.market-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-route .history-table{padding:8px}.detail-route .history-head{display:none}.detail-route .history-row:not(.history-head){grid-template-columns:1fr 1fr auto;gap:10px 14px;margin:8px 0;padding:13px;border:1px solid #242a27;border-radius:9px}.detail-route .history-row [data-label]::before{content:attr(data-label);display:block;margin-bottom:4px;color:#748078;font:8px "DM Mono",monospace;text-transform:uppercase}.detail-route .history-account{grid-column:1}.detail-route .history-side{grid-column:2}.detail-route .history-tx{grid-column:3;grid-row:1}.detail-route .history-number{white-space:normal}.detail-route .history-row time{grid-column:2}.theme-light.token-route .history-row:not(.history-head){border-color:#d2cdc0}}
 @media(max-width:560px){.market-grid{grid-template-columns:1fr}.detail-route .history-row:not(.history-head){grid-template-columns:1fr 1fr}.detail-route .history-tx{grid-column:2;grid-row:1;justify-self:end}}
+/* Verified-data states and token profile details */
+.token-profile {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid #c9c5b8;
+  border-radius: 12px;
+  background: #fffdf74d;
+}
+.token-profile > p { margin: 0; line-height: 1.55; }
+.token-addresses { display: flex; flex-wrap: wrap; gap: 9px 18px; align-items: center; }
+.token-addresses > span, .token-addresses > a { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; }
+.token-addresses > span { color: #62685e; }
+.token-addresses a { color: #171914; text-decoration: none; overflow-wrap: anywhere; }
+.token-addresses a:hover { color: #315b31; }
+.token-addresses code { overflow-wrap: anywhere; }
+.empty-markets { grid-column: 1 / -1; display: grid; justify-items: center; gap: 8px; padding: 54px 20px; color: #62685e; text-align: center; }
+.empty-markets b { color: #171914; font-size: 18px; }
+.price-points { display: flex; margin-top: 18px; }
+.price-points b { font-size: 13px; }
+.theme-dark .token-profile { border-color: #28312c; background: #111714; }
+.theme-dark .token-addresses > span { color: #8a968e; }
+.theme-dark .token-addresses a { color: #e5ebe5; }
+.theme-dark .token-addresses a:hover { color: #a8ff65; }
+.theme-dark .empty-markets { color: #8a968e; }
+.theme-dark .empty-markets b { color: #e5ebe5; }
+.empty-markets span { max-width: 460px; line-height: 1.5; }
+.trade-submit:disabled { cursor: not-allowed; opacity: .58; }
+@media (max-width: 640px) {
+  .token-profile { padding: 12px; }
+  .token-addresses { display: grid; grid-template-columns: 1fr; }
+  .token-addresses > span, .token-addresses > a { min-height: 34px; }
+}

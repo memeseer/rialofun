@@ -21,16 +21,10 @@ export function createMarket({ id, name, ticker, creator, image = "" }) {
     platformFees: 0,
     poolFees: 0,
     volumeRlo: 0,
-    holders: 0,
+    netBuyers: 0,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-}
-
-export function seededMarket({ id, name, ticker, creator, image, target = 0 }) {
-  let market = createMarket({ id, name, ticker, creator, image });
-  if (target > 0) market = trade(market, "buy", target, { allowGraduation: false }).market;
-  return market;
 }
 
 export function soldTokens(market) {
@@ -81,50 +75,4 @@ export function quote(market, side, input) {
   const output = gross - fee;
   if (market.phase === "curve" && output > market.actualRlo) return { output: 0, fee, priceImpact: 0, error: "Curve reserve is insufficient." };
   return { output, fee, priceImpact: amount / tokens * 100 };
-}
-
-export function trade(market, side, input, options = {}) {
-  const quoted = quote(market, side, input);
-  if (quoted.error) return { market, quote: quoted, graduated: false };
-  const next = { ...market };
-  const amount = Number(input);
-
-  if (next.phase === "curve") {
-    if (side === "buy") {
-      next.virtualRlo += amount - quoted.fee;
-      next.actualRlo += amount - quoted.fee;
-      next.tokenReserve -= quoted.output;
-      next.platformFees += quoted.fee;
-      next.volumeRlo += amount;
-      next.holders += 1;
-    } else {
-      const gross = quoted.output + quoted.fee;
-      next.virtualRlo -= gross;
-      next.actualRlo -= gross;
-      next.tokenReserve += amount;
-      next.platformFees += quoted.fee;
-      next.volumeRlo += gross;
-    }
-  } else if (side === "buy") {
-    next.poolRlo += amount;
-    next.poolTokens -= quoted.output;
-    next.poolFees += quoted.fee;
-    next.volumeRlo += amount;
-    next.holders += 1;
-  } else {
-    const gross = quoted.output + quoted.fee;
-    next.poolRlo -= gross;
-    next.poolTokens += amount;
-    next.poolFees += quoted.fee;
-    next.volumeRlo += gross;
-  }
-
-  const shouldGraduate = next.phase === "curve" && progress(next) >= 100 && options.allowGraduation !== false;
-  if (shouldGraduate) {
-    next.phase = "pool";
-    next.poolRlo = next.actualRlo;
-    next.poolTokens = next.tokenReserve;
-    next.actualRlo = 0;
-  }
-  return { market: next, quote: quoted, graduated: shouldGraduate };
 }

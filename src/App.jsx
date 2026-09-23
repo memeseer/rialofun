@@ -18,20 +18,15 @@ import {
   progress,
   quote,
   spotPrice,
-  trade,
 } from "./economy.js";
 import {
-  LIVE_MARKET,
-  GRADUATION_MARKET,
   getRloBalance,
   discoverOnchainMarkets,
   graduateOnchain,
   liquidityOnchain,
   launchOnchain,
-  loadTradeHistory,
   loadOnchainMarkets,
   readOnchainMarket,
-  recordConfirmedTrade,
   saveOnchainMarket,
   tradeOnchain,
 } from "./rialoSettlement.js";
@@ -40,23 +35,9 @@ import {
   fetchMarketCandles,
   fetchMarketTrades,
   publishMarketMetadata,
-  publishTrade,
   uploadTokenImage,
 } from "./dataApi.js";
 import { TokenChart } from "./TokenChart.jsx";
-
-const liveMarket = {
-  ...createMarket({
-    id: "rialo-live",
-    name: "RialoFun Live",
-    ticker: "RFUN",
-    creator: "Gjq1…xt52",
-  }),
-  onchain: LIVE_MARKET,
-  createdAt: Date.now() + 1,
-};
-const graduationMarket = { ...createMarket({ id: "rialo-graduation", name: "RialoFun Pool Test", ticker: "POOL", creator: "Gjq1…xt52" }), onchain: GRADUATION_MARKET, createdAt: Date.now() };
-const seededMarkets = [liveMarket, graduationMarket];
 
 const filters = ["Latest", "Trending", "Top volume", "Newest"];
 const compact = (number) =>
@@ -146,7 +127,7 @@ function MarketCard({ market, onTrade }) {
       </div>
       <div className="card-meta">
         <span>Vol&nbsp; {formatRlo(market.volumeRlo)}</span>
-        <span>Holders&nbsp; {market.holders}</span>
+        <span>Net buyers&nbsp; {market.netBuyers ?? 0}</span>
       </div>
       <div className="creator">
         <i /> <span>Created by&nbsp;</span>
@@ -172,7 +153,7 @@ function TradeHistory({ trades, ticker }) {
     <div className="history-table" role="table" aria-label={`${ticker} confirmed trades`}>
       <div className="history-row history-head" role="row">
         <span>Trader</span><span>Side</span><span>Value</span><span>Tokens</span>
-        <span>Price</span><span>Time</span><span aria-label="Transaction" />
+        <span>Avg price</span><span>Time</span><span aria-label="Transaction" />
       </div>
       {trades.map((item) => (
         <div className="history-row" role="row" key={item.signature}>
@@ -212,8 +193,9 @@ function TradeHistory({ trades, ticker }) {
 export function App() {
   const [activeFilter, setActiveFilter] = useState("Latest");
   const [wallet, setWallet] = useState("");
+  const [walletAccount, setWalletAccount] = useState(null);
   const [notice, setNotice] = useState("");
-  const [markets, setMarkets] = useState(() => [...loadOnchainMarkets()]);
+  const [markets, setMarkets] = useState(() => loadOnchainMarkets().filter((market) => !["rialo-live", "rialo-graduation"].includes(market.id)));
   const [launchOpen, setLaunchOpen] = useState(false);
   const [launchRoute, setLaunchRoute] = useState(() => window.location.hash === "#launch");
   const [theme, setTheme] = useState(() => localStorage.getItem("rialofun:theme") || "light");
@@ -225,6 +207,9 @@ export function App() {
     name: "",
     ticker: "",
     image: "",
+    description: "",
+    website: "",
+    twitter: "",
     initialBuy: "1",
   });
   const [tradeSide, setTradeSide] = useState("buy");
@@ -233,7 +218,7 @@ export function App() {
   const [liquiditySide, setLiquiditySide] = useState("add");
   const [liquidityRlo, setLiquidityRlo] = useState("1");
   const [liquidityToken, setLiquidityToken] = useState("1");
-  const [portfolio, setPortfolio] = useState({ rlo: 250, tokens: {} });
+  const [portfolio, setPortfolio] = useState({ rlo: 0, tokens: {} });
   const [pending, setPending] = useState(false);
   const [chartRange, setChartRange] = useState("5m");
   const [confirmedTrades, setConfirmedTrades] = useState([]);
@@ -247,12 +232,14 @@ export function App() {
       return;
     }
     setChartRange("5m");
-    const local = loadTradeHistory(selected.id);
-    setConfirmedTrades(local);
-    void fetchMarketTrades(selected.id, selected.onchain?.state).then((remote) => {
-      const merged = new Map([...local, ...remote].map((item) => [item.signature, item]));
-      setConfirmedTrades([...merged.values()].sort((a, b) => Number(b.time) - Number(a.time)));
-    }).catch(() => undefined);
+    setConfirmedTrades([]);
+    let active = true;
+    const refresh = () => fetchMarketTrades(selected.id, selected.onchain?.state)
+      .then((remote) => { if (active) setConfirmedTrades(remote); })
+      .catch(() => { if (active) setConfirmedTrades([]); });
+    void refresh();
+    const timer = window.setInterval(refresh, 12_000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [selected?.id]);
   useEffect(() => {
     if (!selected) {
@@ -301,9 +288,11 @@ export function App() {
       );
     try {
       const result = await provider.features["standard:connect"].connect();
-      const address = result.accounts?.[0]?.address;
+      const account = result.accounts?.[0];
+      const address = account?.address;
       if (!address) throw new Error("Wallet did not return an address.");
       setWallet(address);
+      setWalletAccount(account);
       const rlo = await getRloBalance(address);
       setPortfolio((current) => ({ ...current, rlo }));
       setNotice(`Wallet connected. Testnet balance: ${formatRlo(rlo)}.`);
@@ -336,7 +325,6 @@ export function App() {
       platformFees: chain.fees,
       poolRlo: chain.phase === "pool" ? chain.actualRlo : 0,
       poolTokens: chain.phase === "pool" ? chain.tokenReserve : 0,
-      holders: chain.sold > 0 ? 1 : 0,
     };
     setMarkets((current) =>
       current.map((item) => (item.id === market.id ? next : item)),
@@ -349,10 +337,8 @@ export function App() {
     return next;
   };
   useEffect(() => {
-    void syncMarket(liveMarket, wallet).catch(() => undefined);
-    void syncMarket(graduationMarket, wallet).catch(() => undefined);
-    loadOnchainMarkets().forEach((market) => void syncMarket(market, wallet).catch(() => undefined));
-    void discoverOnchainMarkets().then((found) => setMarkets((current) => { const byState = new Map(found.map(item => [item.onchain.state, item])); return current.map(item => byState.get(item.onchain?.state) ? { ...item, ...byState.get(item.onchain.state) } : item).concat(found.filter(item => !current.some(existing => existing.onchain?.state === item.onchain.state))); })).catch(() => undefined);
+    loadOnchainMarkets().filter((market) => !["rialo-live", "rialo-graduation"].includes(market.id)).forEach((market) => void syncMarket(market, wallet).catch(() => undefined));
+    void discoverOnchainMarkets().then((found) => setMarkets((current) => { const byState = new Map(found.map(item => [item.onchain.state, item])); return current.map(item => byState.has(item.onchain?.state) ? { ...item, ...byState.get(item.onchain.state) } : item).concat(found.filter(item => !current.some(existing => existing.onchain?.state === item.onchain.state))); })).catch(() => undefined);
   }, [wallet]);
   useEffect(() => {
     const hydrateSharedMetadata = () => fetchMarketMetadata().then((metadata) => setMarkets((current) => {
@@ -364,10 +350,13 @@ export function App() {
           ticker: saved.ticker,
           creator: saved.creator,
           image: saved.image,
+          description: saved.description || "",
+          website: saved.website || "",
+          twitter: saved.twitter || "",
           createdAt: Number(saved.createdAt || 0) || undefined,
           updatedAt: Number(saved.updatedAt || saved.createdAt || 0) || undefined,
           volumeRlo: Number(saved.volumeRlo) || 0,
-          holders: Number(saved.holders) || 0,
+          netBuyers: Number(saved.netBuyers) || 0,
         };
         if (saved.phase) patch.phase = saved.phase;
         if (Number.isFinite(Number(saved.virtualRlo))) patch.virtualRlo = Number(saved.virtualRlo);
@@ -413,18 +402,21 @@ export function App() {
     if (!form.name.trim() || !form.ticker.trim()) return;
     if (!form.image) return setNotice("Upload a token image before launch.");
     const ticker = form.ticker.toUpperCase();
-    let persistentImage = form.image;
+    let persistentImage;
     try {
       persistentImage = await uploadTokenImage(form.image);
-    } catch {
-      // Local development intentionally keeps the compressed image in this browser.
+    } catch (error) {
+      return setNotice(error instanceof Error ? `Image upload failed; token not launched. ${error.message}` : "Image upload failed; token not launched.");
     }
     let market = createMarket({
       id: `${ticker}-${Date.now()}`,
       name: form.name.trim(),
       ticker,
-      creator: `${wallet.slice(0, 5)}…${wallet.slice(-4)}`,
+      creator: wallet,
       image: persistentImage,
+      description: form.description.trim(),
+      website: form.website.trim(),
+      twitter: form.twitter.trim(),
     });
     market.updatedAt = Date.now();
     const initialBuy = Number(form.initialBuy || 0);
@@ -447,17 +439,11 @@ export function App() {
         initialBuy: String(initialBuy),
         minTokensOut: (preview.output * 0.99).toFixed(6),
       });
-      market = { ...market, onchain: deployed };
-      market = await syncMarket(market, wallet);
+      market.id = `chain-${deployed.state.slice(0, 8)}`;
+      market = { ...market, onchain: deployed, virtualRlo: 0, tokenReserve: 0, actualRlo: 0, poolRlo: 0, poolTokens: 0, volumeRlo: 0, netBuyers: 0, dataLoading: true };
+      try { market = await syncMarket(market, wallet); } catch { /* The launch tx already succeeded; keep it discoverable while RPC catches up. */ }
       saveOnchainMarket(market);
-      const launchTrade = {marketId:market.id,signature:deployed.signature,side:"BUY",account:wallet,rloAmount:String(initialBuy),tokenAmount:null,price:spotPrice(market),time:Date.now()};
-      recordConfirmedTrade(launchTrade);
-      setConfirmedTrades([launchTrade]);
-      void publishMarketMetadata(market).then(() => publishTrade(launchTrade)).catch(() => undefined);
-      setPortfolio((current) => ({
-        ...current,
-        rlo: current.rlo - initialBuy,
-      }));
+      void getRloBalance(wallet).then((rlo) => setPortfolio((current) => ({ ...current, rlo }))).catch(() => undefined);
       setMarkets((current) => [
         market,
         ...current.filter((item) => item.id !== market.id),
@@ -465,10 +451,16 @@ export function App() {
       setLaunchOpen(false);
       setTradeId(market.id);
       window.location.hash = `token/${market.id}`;
-      setForm({ name: "", ticker: "", image: "", initialBuy: "1" });
-      setNotice(
-        `${ticker} launched on Rialo testnet. Transaction ${deployed.signature.slice(0, 10)}…`,
-      );
+      setForm({ name: "", ticker: "", image: "", description: "", website: "", twitter: "", initialBuy: "1" });
+      try {
+        await publishMarketMetadata(market, walletAccount);
+        setNotice(`${ticker} is live. Launch transaction ${deployed.signature.slice(0, 10)}… Shared profile published.`);
+      } catch (error) {
+        const pendingProfile = { ...market, metadataPending: true };
+        saveOnchainMarket(pendingProfile);
+        setMarkets((items) => items.map((item) => item.id === market.id ? pendingProfile : item));
+        setNotice(`${ticker} is live on-chain, but its shared profile still needs your wallet signature. ${error instanceof Error ? error.message : ""}`);
+      }
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : "Launch transaction failed.",
@@ -503,12 +495,9 @@ export function App() {
         setMarkets((current) => current.map((item) => item.id === selected.id ? { ...item, updatedAt: Date.now() } : item));
         const rlo = await getRloBalance(wallet);
         setPortfolio((current) => ({ ...current, rlo }));
-        const confirmed = { marketId:selected.id, signature:result.signature, side:tradeSide.toUpperCase(), account:wallet, rloAmount:tradeSide === "buy" ? String(amount) : String(tradeQuote.output), tokenAmount:tradeSide === "buy" ? String(tradeQuote.output) : String(amount), price:spotPrice(synced), time:Date.now() };
-        recordConfirmedTrade(confirmed);
-        setConfirmedTrades((current) => [confirmed, ...current.filter((item) => item.signature !== confirmed.signature)]);
-        void publishTrade(confirmed).catch(() => undefined);
+        void fetchMarketTrades(selected.id, selected.onchain?.state).then(setConfirmedTrades).catch(() => undefined);
         setNotice(
-          `${tradeSide === "buy" ? "Buy" : "Sell"} settled on testnet: ${result.signature.slice(0, 12)}…`,
+          `${tradeSide === "buy" ? "Buy" : "Sell"} settled on testnet: ${result.signature.slice(0, 12)}… Trade history updates after indexer confirmation.`,
         );
       } catch (error) {
         setNotice(
@@ -519,35 +508,7 @@ export function App() {
       }
       return;
     }
-    if (tradeSide === "buy" && amount > portfolio.rlo)
-      return setNotice("Your local test balance is too low for this trade.");
-    if (tradeSide === "sell" && amount > holdings)
-      return setNotice(`You hold ${compact(holdings)} ${selected.ticker}.`);
-    const result = trade(selected, tradeSide, amount);
-    if (result.quote.error) return setNotice(result.quote.error);
-    setMarkets((current) =>
-      current.map((market) =>
-        market.id === selected.id ? { ...result.market, updatedAt: Date.now() } : market,
-      ),
-    );
-    setPortfolio((current) => ({
-      rlo:
-        tradeSide === "buy"
-          ? current.rlo - amount
-          : current.rlo + result.quote.output,
-      tokens: {
-        ...current.tokens,
-        [selected.id]:
-          tradeSide === "buy"
-            ? holdings + result.quote.output
-            : holdings - amount,
-      },
-    }));
-    setNotice(
-      result.graduated
-        ? `${selected.ticker} graduated — its remaining inventory and collected RLO now form a pool.`
-        : `${tradeSide === "buy" ? "Bought" : "Sold"} ${compact(tradeSide === "buy" ? result.quote.output : amount)} ${selected.ticker} in local simulation.`,
-    );
+    setNotice("This market is not available for on-chain trading.");
   };
   const graduateMarket = async () => {
     if (!selected?.onchain || !wallet) return;
@@ -601,40 +562,21 @@ export function App() {
           </button>
         </div>
       </header>
-      <section className="ticker">
-        <span>
-          CURVE FEE <b className="up">1.00%</b>
-        </span>
-        <span>
-          POOL FEE <b className="up">0.30%</b>
-        </span>
-        <span>
-          GRADUATION <b>800M SOLD</b>
-        </span>
-        <span>
-          MODE <b className="up">RIALO TESTNET + DEMO</b>
-        </span>
-      </section>
       <section className="hero" id="top">
         <div>
-          <p className="eyebrow">RIALO TESTNET · SETTLEMENT MVP</p>
           <h1>
             Launch a token.
             <br />
             <em>Grow its pool.</em>
           </h1>
-          <p className="subhead">
-            Fair curve → automatic pool migration → open trading.
-          </p>
+          <p className="subhead">Bonding curve → creator-triggered pool migration → on-chain trading.</p>
           <button
             className="button primary hero-button"
             onClick={() => setLaunchOpen(true)}
           >
             Create token <ArrowRight size={22} weight="bold" />
           </button>
-          <p className="hero-note">
-            Live markets move testnet RLO and Token-2022 assets.
-          </p>
+          <p className="hero-note">Create on Rialo Testnet · trades require wallet approval</p>
         </div>
         <div className="hero-chart">
           <div className="hero-labels">
@@ -661,7 +603,7 @@ export function App() {
             Live curves <span>↗</span>
           </h2>
           <div className="local-balance">
-            Test balance <b>{formatRlo(portfolio.rlo)}</b>
+            {wallet ? "Wallet balance" : "Connect wallet"} <b>{wallet ? formatRlo(portfolio.rlo) : "—"}</b>
           </div>
         </div>
         <div className="trend-row">
@@ -713,40 +655,7 @@ export function App() {
           {visibleMarkets.map((market) => (
             <MarketCard market={market} onTrade={setTradeId} key={market.id} />
           ))}
-        </div>
-      </section>
-      <section className="economics" id="economics">
-        <div>
-          <p className="eyebrow">HOW THE MVP WORKS</p>
-          <h2>One transparent route to liquidity.</h2>
-        </div>
-        <div className="economy-steps">
-          <article>
-            <b>01</b>
-            <strong>Launch</strong>
-            <span>1B fixed supply enters a virtual-reserve bonding curve.</span>
-          </article>
-          <article>
-            <b>02</b>
-            <strong>Trade</strong>
-            <span>
-              1% curve fee is tracked separately; price uses x · y = k.
-            </span>
-          </article>
-          <article>
-            <b>03</b>
-            <strong>Graduate</strong>
-            <span>
-              At 800M sold, collected RLO plus remaining tokens become the pool.
-            </span>
-          </article>
-          <article>
-            <b>04</b>
-            <strong>Pool</strong>
-            <span>
-              The pool uses a 0.30% fee and stays tradable in simulation.
-            </span>
-          </article>
+          {!visibleMarkets.length && <div className="empty-markets"><b>No indexed markets yet</b><span>New token profiles appear here after their launch metadata is signed and indexed.</span></div>}
         </div>
       </section>
       {notice && (
@@ -797,12 +706,16 @@ export function App() {
                 <input
                   value={form.ticker}
                   onChange={(event) =>
-                    setForm({ ...form, ticker: event.target.value })
+                    setForm({ ...form, ticker: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10) })
                   }
-                  placeholder="e.g. NOVA"
-                  maxLength="8"
+                  placeholder="NOVA"
+                  maxLength="10"
+                  required
                 />
               </label>
+              <label>Short description <textarea maxLength={280} rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="What is this token about?" /></label>
+              <label>Website <input type="url" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} placeholder="https://example.com" /></label>
+              <label>X / Twitter <input value={form.twitter} onChange={(event) => setForm({ ...form, twitter: event.target.value.slice(0, 100) })} placeholder="https://x.com/project" /></label>
               <label>
                 Initial buy (RLO)
                 <input
@@ -814,10 +727,6 @@ export function App() {
                     setForm({ ...form, initialBuy: event.target.value })
                   }
                 />
-                <small className="atomic-note">
-                  Token creation and this buy are one atomic action — no gap for
-                  a sniper.
-                </small>
               </label>
               <label className="image-upload">
                 <UploadSimple size={18} weight="bold" />{" "}
@@ -861,7 +770,7 @@ export function App() {
             </button>
             <div className="trade-summary">
               <p className="eyebrow">
-                {selected.phase === "pool" ? "LIQUIDITY POOL" : "BONDING CURVE"}
+                {selected.phase === "pool" ? "LIQUIDITY POOL" : selected.phase === "graduation-ready" ? "READY TO GRADUATE" : "BONDING CURVE"}
               </p>
               <h2>
                 {selected.name} <span>{selected.ticker}</span>
@@ -871,6 +780,17 @@ export function App() {
                 <small> per token</small>
               </p>
               {detailRoute && <TokenChart ticker={selected.ticker} candles={candles} price={spotPrice(selected)} range={chartRange} loading={candlesLoading} onRangeChange={setChartRange} />}
+              <section className="token-profile">
+                {selected.description && <p>{selected.description}</p>}
+                <div className="token-addresses">
+                  <span>Creator <a href={`https://rialo-explorer-testnet-direct.vercel.app/accounts/${selected.creator}`} target="_blank" rel="noreferrer">{shortAddress(selected.creator)} <ArrowSquareOut size={13} /></a></span>
+                  {selected.onchain?.mint && <span>Token <a href={`https://rialo-explorer-testnet-direct.vercel.app/accounts/${selected.onchain.mint}`} target="_blank" rel="noreferrer">{shortAddress(selected.onchain.mint)} <ArrowSquareOut size={13} /></a></span>}
+                  {selected.onchain?.pool?.pool && <span>Pool <a href={`https://rialo-explorer-testnet-direct.vercel.app/accounts/${selected.onchain.pool.pool}`} target="_blank" rel="noreferrer">{shortAddress(selected.onchain.pool.pool)} <ArrowSquareOut size={13} /></a></span>}
+                  {selected.website && <a href={selected.website} target="_blank" rel="noreferrer">Website <ArrowSquareOut size={13} /></a>}
+                  {selected.twitter && <a href={selected.twitter.startsWith("http") ? selected.twitter : `https://x.com/${selected.twitter.replace(/^@/, "")}`} target="_blank" rel="noreferrer">X / Twitter <ArrowSquareOut size={13} /></a>}
+                </div>
+                {selected.metadataPending && wallet === selected.creator && <button className="button ghost" disabled={pending} onClick={async () => { setPending(true); try { await publishMarketMetadata(selected, walletAccount); setMarkets((items) => items.map((item) => item.id === selected.id ? { ...item, metadataPending: false } : item)); setNotice("Shared token profile published."); } catch (error) { setNotice(error instanceof Error ? error.message : "Could not publish token metadata."); } finally { setPending(false); } }}>Publish shared profile</button>}
+              </section>
               <div className="metric-grid">
                 <div>
                   <span>Progress</span>
@@ -906,11 +826,7 @@ export function App() {
                       : "Bonding curve price and reserves"}
                   </span>
                 </div>
-                <div className="price-points">
-                  <b>{formatTokenPrice(spotPrice(selected) * 0.85)}</b>
-                  <b>{formatTokenPrice(spotPrice(selected))}</b>
-                  <b>{formatTokenPrice(spotPrice(selected) * 1.15)}</b>
-                </div>
+                <div className="price-points"><b>{formatTokenPrice(spotPrice(selected))} RLO / token</b></div>
               </section>
               <div className="curve-visual">
                 <i
@@ -924,7 +840,7 @@ export function App() {
                   ? "Constant-product pool · 0.30% LP fee"
                   : "Virtual-reserve curve · 1.00% platform fee"}
               </p>
-              {selected.onchain && selected.phase !== "pool" && <button className="button ghost" disabled={pending || !wallet} onClick={graduateMarket}>Graduate to DEX pool</button>}
+              {selected.onchain && selected.phase === "graduation-ready" && <button className="button ghost" disabled={pending || !wallet} onClick={graduateMarket}>Graduate to DEX pool</button>}
               {selected.onchain && selected.phase === "pool" && <button className="button ghost" disabled={pending || !wallet} onClick={() => setLiquidityOpen(value => !value)}>{liquidityOpen ? "Close liquidity" : "Manage liquidity"}</button>}
               {liquidityOpen && <section className="liquidity-panel"><div><button className={liquiditySide === "add" ? "active" : ""} onClick={() => setLiquiditySide("add")}>Add</button><button className={liquiditySide === "remove" ? "active" : ""} onClick={() => setLiquiditySide("remove")}>Remove</button></div><input value={liquidityRlo} onChange={event => setLiquidityRlo(event.target.value)} placeholder="RLO amount"/><input value={liquidityToken} onChange={event => setLiquidityToken(event.target.value)} placeholder={liquiditySide === "add" ? "Token amount" : "LP amount"}/><button className="button primary" disabled={pending} onClick={applyLiquidity}>{pending ? "Waiting for wallet…" : `${liquiditySide === "add" ? "Add" : "Remove"} liquidity`}</button></section>}
               <section className="recent-trades trade-history">
@@ -1009,9 +925,9 @@ export function App() {
                 onClick={wallet ? applyTrade : connectWallet}
                 disabled={pending}
               >
-                {pending ? "Waiting for wallet…" : wallet ? `${selected.onchain ? "Confirm" : "Simulate"} ${tradeSide}` : "Connect wallet to trade"}
+                {pending ? "Waiting for wallet…" : wallet ? `${selected.onchain ? "Confirm" : "Unavailable"} ${tradeSide}` : "Connect wallet to trade"}
               </button>
-              <p className="trade-disclaimer">{selected.onchain ? "This action settles testnet RLO and Token-2022 assets after wallet approval." : "Simulation only — no transaction, mint, or RLO transfer is created."}</p>
+              <p className="trade-disclaimer">{selected.onchain ? "Rialo Testnet transaction · wallet approval required" : "On-chain market data is not available for this token."}</p>
             </div>
           </section>
         </div>

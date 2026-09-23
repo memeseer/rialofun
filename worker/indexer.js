@@ -1,11 +1,14 @@
 export const PROGRAM_ID = "2iquqTG5Frnj64kzwa5RFWawuJpXg3fYhMkTPiT22AiM";
 const RPC_URL = "https://testnet.rialo.io:4101";
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-const TOTAL_SUPPLY = 1_000_000_000;
 
-function decodeBase58(value) {
+function decodeBase58(value = "") {
   let number = 0n;
-  for (const character of value) number = number * 58n + BigInt(BASE58.indexOf(character));
+  for (const character of value) {
+    const digit = BASE58.indexOf(character);
+    if (digit < 0) return new Uint8Array();
+    number = number * 58n + BigInt(digit);
+  }
   const bytes = [];
   while (number) { bytes.unshift(Number(number & 255n)); number >>= 8n; }
   for (let index = 0; index < value.length && value[index] === "1"; index += 1) bytes.unshift(0);
@@ -23,7 +26,7 @@ function decodeState(account) {
   const bytes = Uint8Array.from(atob(account.data[0]), (character) => character.charCodeAt(0));
   if (bytes.length !== 128 || bytes[0] !== 1) return null;
   return {
-    phase: bytes[3] === 1 ? "pool" : "curve",
+    phase: bytes[3] === 2 ? "pool" : bytes[3] === 1 ? "graduation-ready" : "curve",
     virtualRlo: Number(readU128(bytes, 40)) / 1e9,
     tokenReserve: Number(readU128(bytes, 56)) / 1e6,
     sold: Number(readU128(bytes, 72)) / 1e6,
@@ -40,80 +43,110 @@ async function rpc(method, params) {
   return payload.result;
 }
 
-async function snapshotFor(state) {
-  const result = await rpc("getAccountInfo", [{ address: state }]);
-  return decodeState(result?.value);
+function accountKeys(transaction) {
+  const keys = transaction.transaction?.message?.accountKeys || [];
+  return keys.map((item) => typeof item === "string" ? item : item.pubkey);
 }
 
-async function ensureMarket(db, state, mint, creator, time) {
-  const existing = await db.prepare("SELECT id FROM markets WHERE state=?").bind(state).first();
-  if (existing) return existing.id;
-  const id = `chain-${state.slice(0, 8)}`;
-  await db.prepare(`INSERT OR IGNORE INTO markets (id,state,mint,name,ticker,creator,image_url,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, state, mint || "", "RialoFun market", mint ? `RLO-${mint.slice(0, 4)}` : "RLO", creator || "On-chain", "", time, Date.now()).run();
-  return id;
+function tokenBalance(transaction, accountIndex, mint) {
+  const balances = transaction.meta?.postTokenBalances || [];
+  const previous = transaction.meta?.preTokenBalances || [];
+  const amountFor = (items) => {
+    const match = items.find((item) => item.accountIndex === accountIndex && item.mint === mint);
+    return match ? BigInt(match.uiTokenAmount?.amount || "0") : 0n;
+  };
+  return amountFor(balances) - amountFor(previous);
 }
 
-function eventFromInstruction(instruction, keys) {
-  const programId = keys[instruction.programIdIndex];
-  if (programId !== PROGRAM_ID) return null;
+function instructionEvent(instruction, keys) {
+  if (keys[instruction.programIdIndex] !== PROGRAM_ID) return null;
   const data = decodeBase58(instruction.data || "");
   const tag = data[0];
   if (![0, 1, 2, 3, 4, 5, 6, 7].includes(tag)) return null;
   const accounts = instruction.accounts || [];
   const state = keys[accounts[0]];
   if (!state) return null;
-  return { tag, data, accounts, state, mint: keys[accounts[2]], trader: keys[accounts[1]] };
+  return { tag, data, accounts, state, trader: keys[accounts[1]], mint: keys[accounts[2]], tokenAccountIndex: accounts[3], traderIndex: accounts[1] };
+}
+
+async function ensureMarket(db, event, time) {
+  const existing = await db.prepare("SELECT id FROM markets WHERE state=?").bind(event.state).first();
+  if (existing) return existing.id;
+  const id = `chain-${event.state.slice(0, 8)}`;
+  await db.prepare(`INSERT OR IGNORE INTO markets (id,state,mint,name,ticker,creator,image_url,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, event.state, event.mint || "", "RialoFun market", event.mint ? `RLO-${event.mint.slice(0, 4)}` : "RLO", event.trader || "On-chain", "", time, time).run();
+  return id;
 }
 
 async function indexTransaction(db, item) {
   const transaction = await rpc("getTransaction", [{ signature: item.signature }]);
-  if (!transaction || transaction.meta?.err) return;
-  const message = transaction.transaction?.message;
-  const keys = message?.accountKeys || [];
-  const instructions = message?.instructions || [];
-  const time = Number(item.blockTime || transaction.block_time || Date.now());
+  if (!transaction) throw new Error("RPC has not made this transaction available yet.");
+  if (transaction.meta?.err) return { indexed: true, trades: 0 };
+  const keys = accountKeys(transaction);
+  const instructions = transaction.transaction?.message?.instructions || [];
+  const rawTime = Number(item.blockTime || transaction.block_time || 0);
+  const time = rawTime > 0 ? (rawTime < 1_000_000_000_000 ? rawTime * 1000 : rawTime) : Date.now();
+  let trades = 0;
   for (const instruction of instructions) {
-    const event = eventFromInstruction(instruction, keys);
+    const event = instructionEvent(instruction, keys);
     if (!event) continue;
-    const current = await snapshotFor(event.state).catch(() => null);
-    const previous = await db.prepare("SELECT token_reserve AS tokenReserve,actual_rlo AS actualRlo,virtual_rlo AS virtualRlo,phase FROM market_snapshots WHERE state=?").bind(event.state).first();
-    const marketId = await ensureMarket(db, event.state, event.mint, event.trader, time);
-    if (current) {
-      await db.prepare(`INSERT INTO market_snapshots (state,token_reserve,actual_rlo,virtual_rlo,phase,updated_at) VALUES (?,?,?,?,?,?)
-        ON CONFLICT(state) DO UPDATE SET token_reserve=excluded.token_reserve,actual_rlo=excluded.actual_rlo,virtual_rlo=excluded.virtual_rlo,phase=excluded.phase,updated_at=excluded.updated_at`)
-        .bind(event.state, current.tokenReserve, current.actualRlo, current.virtualRlo, current.phase, Date.now()).run();
-    }
+    const marketId = await ensureMarket(db, event, time);
     if (![0, 1, 2, 4, 5].includes(event.tag)) continue;
-    const firstAmount = Number(readU128(event.data, 1));
-    const measuredTokenDelta = previous && current ? Math.abs(current.tokenReserve - Number(previous.tokenReserve)) : event.tag === 0 && current ? TOTAL_SUPPLY - current.tokenReserve : null;
-    const tokenDelta = measuredTokenDelta && measuredTokenDelta > 0 ? measuredTokenDelta : null;
-    const rloDelta = previous && current ? Math.abs(current.actualRlo - Number(previous.actualRlo)) : null;
-    const side = [0, 1, 4].includes(event.tag) ? "BUY" : "SELL";
-    const rloAmount = side === "BUY" ? firstAmount / 1e9 : (rloDelta ?? 0);
-    const price = current ? (current.phase === "pool" ? current.actualRlo / Math.max(current.tokenReserve, 1) : current.virtualRlo / Math.max(current.tokenReserve, 1)) : 0;
+    const isBuy = [0, 1, 4].includes(event.tag);
+    const tokenDeltaBase = tokenBalance(transaction, event.tokenAccountIndex, event.mint);
+    const tokenAmount = Number(tokenDeltaBase < 0n ? -tokenDeltaBase : tokenDeltaBase) / 1e6;
+    // Do not publish a guessed token quantity. If RPC did not include Token-2022
+    // balance deltas, retry this signature on the next indexer pass.
+    if (!Number.isFinite(tokenAmount) || tokenAmount <= 0) throw new Error(`Missing token balance delta for ${item.signature}.`);
+    const amount = Number(readU128(event.data, 1)) / (isBuy ? 1e9 : 1e6);
+    const preLamports = BigInt(transaction.meta?.preBalances?.[event.traderIndex] || 0);
+    const postLamports = BigInt(transaction.meta?.postBalances?.[event.traderIndex] || 0);
+    const feePayerFee = event.traderIndex === 0 ? BigInt(transaction.meta?.fee || 0) : 0n;
+    const received = postLamports - preLamports + feePayerFee;
+    const rloAmount = isBuy ? amount : Number(received > 0n ? received : 0n) / 1e9;
+    if (!Number.isFinite(rloAmount) || rloAmount <= 0) throw new Error(`Missing RLO balance delta for ${item.signature}.`);
+    const side = isBuy ? "BUY" : "SELL";
+    const price = rloAmount / tokenAmount;
     await db.prepare(`INSERT INTO trades (signature,market_id,account,side,rlo_amount,token_amount,price,block_time,verified)
       VALUES (?,?,?,?,?,?,?,?,1) ON CONFLICT(signature) DO UPDATE SET market_id=excluded.market_id,account=excluded.account,side=excluded.side,rlo_amount=excluded.rlo_amount,token_amount=excluded.token_amount,price=excluded.price,block_time=excluded.block_time,verified=1`)
-      .bind(item.signature, marketId, event.trader || "On-chain", side, rloAmount, tokenDelta, price, time).run();
+      .bind(item.signature, marketId, event.trader || "On-chain", side, rloAmount, tokenAmount, price, time).run();
     await db.prepare("UPDATE markets SET updated_at=? WHERE id=?").bind(time, marketId).run();
+    trades += 1;
   }
-  await db.prepare("INSERT OR REPLACE INTO indexed_transactions (signature,block_height,indexed_at) VALUES (?,?,?)").bind(item.signature, Number(item.blockHeight || transaction.block_height || 0), Date.now()).run();
+  // The cursor only advances after the complete transaction was fetched and parsed.
+  await db.prepare("INSERT OR REPLACE INTO indexed_transactions (signature,block_height,indexed_at,attempts,last_error) VALUES (?,?,?,0,'')")
+    .bind(item.signature, Number(item.blockHeight || transaction.block_height || 0), Date.now()).run();
+  return { indexed: true, trades };
 }
 
 export async function runIndexer(env) {
   if (!env.DB) throw new Error("D1 binding is not configured.");
   const cursor = await env.DB.prepare("SELECT value FROM indexer_state WHERE key='latest_signature'").first();
-  const config = { limit: 20 };
+  const config = { limit: 50 };
   if (cursor?.value) config.until = cursor.value;
   const result = await rpc("getSignaturesForAddress", [{ address: PROGRAM_ID, config }]);
-  const signatures = (result?.value || []).filter((item) => !item.err).sort((left, right) => Number(left.blockHeight || 0) - Number(right.blockHeight || 0));
+  const signatures = (result?.value || []).sort((left, right) => Number(left.blockHeight || 0) - Number(right.blockHeight || 0));
   let indexed = 0;
+  let failed = null;
   for (const item of signatures) {
     const existing = await env.DB.prepare("SELECT signature FROM indexed_transactions WHERE signature=?").bind(item.signature).first();
     if (existing) continue;
-    await indexTransaction(env.DB, item);
-    indexed += 1;
+    try {
+      await indexTransaction(env.DB, item);
+      indexed += 1;
+    } catch (error) {
+      failed = { signature: item.signature, message: String(error?.message || error) };
+      await env.DB.prepare(`INSERT INTO indexer_failures (signature,attempts,last_error,updated_at) VALUES (?,1,?,?)
+        ON CONFLICT(signature) DO UPDATE SET attempts=attempts+1,last_error=excluded.last_error,updated_at=excluded.updated_at`)
+        .bind(item.signature, failed.message.slice(0, 500), Date.now()).run();
+      break;
+    }
   }
-  if (result?.value?.[0]?.signature) await env.DB.prepare("INSERT OR REPLACE INTO indexer_state (key,value,updated_at) VALUES ('latest_signature',?,?)").bind(result.value[0].signature, Date.now()).run();
-  return { seen: signatures.length, indexed };
+  // Move the watermark to the newest signature only if every older signature
+  // in this window completed. This avoids silently skipping RPC lag/outages.
+  if (!failed && result?.value?.[0]?.signature) {
+    await env.DB.prepare("INSERT OR REPLACE INTO indexer_state (key,value,updated_at) VALUES ('latest_signature',?,?)")
+      .bind(result.value[0].signature, Date.now()).run();
+  }
+  return { seen: signatures.length, indexed, failed };
 }
