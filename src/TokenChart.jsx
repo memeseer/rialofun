@@ -18,6 +18,7 @@ const VOLUME_TOP = 210;
 const VOLUME_BOTTOM = 244;
 const INTERVAL_MS = { "1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000 };
 const MAX_CANDLES = 180;
+const MAX_EMPTY_CANDLES = 600;
 
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
@@ -37,7 +38,7 @@ function formatTime(value, range) {
   return new Date(finite(value)).toLocaleString([], options);
 }
 
-function normalizeCandles(candles) {
+function normalizeCandles(candles, range) {
   const normalized = candles
     .map((item) => ({
       time: finite(item.time),
@@ -50,11 +51,34 @@ function normalizeCandles(candles) {
     .filter((item) => item.time && item.open > 0 && item.high > 0 && item.low > 0 && item.close > 0)
     .sort((left, right) => left.time - right.time);
 
-  return normalized;
+  const interval = INTERVAL_MS[range] || INTERVAL_MS["5m"];
+  const filled = [];
+  let emptyCount = 0;
+  for (const candle of normalized) {
+    const previous = filled.at(-1);
+    const missing = previous ? Math.round((candle.time - previous.time) / interval) - 1 : 0;
+    if (missing > 0 && emptyCount + missing <= MAX_EMPTY_CANDLES) {
+      for (let step = 1; step <= missing; step += 1) {
+        const time = previous.time + interval * step;
+        filled.push({
+          time,
+          open: previous.close,
+          high: previous.close,
+          low: previous.close,
+          close: previous.close,
+          volume: 0,
+          noTrades: true,
+        });
+      }
+      emptyCount += missing;
+    }
+    filled.push(candle);
+  }
+  return filled;
 }
 
 export function TokenChart({ ticker, candles, range, loading, error, onRangeChange }) {
-  const series = useMemo(() => normalizeCandles(candles), [candles]);
+  const series = useMemo(() => normalizeCandles(candles, range), [candles, range]);
   const [hovered, setHovered] = useState(null);
   const firstCandleTime = series[0]?.time;
   const lastCandleTime = series.at(-1)?.time;
@@ -101,7 +125,7 @@ export function TokenChart({ ticker, candles, range, loading, error, onRangeChan
   }, [series, range]);
 
   const active = hovered == null ? series.at(-1) : series[hovered];
-  const activeDirection = active && active.close >= active.open ? "Up" : "Down";
+  const activeDirection = active?.noTrades ? "No trades" : active && active.close >= active.open ? "Up" : "Down";
 
   return (
     <section className="token-chart candle-chart" aria-label={`${ticker} candlestick price chart`}>
@@ -116,7 +140,7 @@ export function TokenChart({ ticker, candles, range, loading, error, onRangeChan
             <span>H <b>{formatPrice(active.high)}</b></span>
             <span>L <b>{formatPrice(active.low)}</b></span>
             <span>C <b>{formatPrice(active.close)}</b></span>
-            <span className={activeDirection === "Up" ? "positive" : "negative"}>{activeDirection}</span>
+            <span className={active?.noTrades ? "muted" : activeDirection === "Up" ? "positive" : "negative"}>{activeDirection}</span>
           </div>
         )}
       </div>
@@ -147,17 +171,17 @@ export function TokenChart({ ticker, candles, range, loading, error, onRangeChan
               const bodyHeight = Math.max(Math.abs(item.closeY - item.openY), 2);
               return (
                 <g
-                  className={rising ? "candle candle-up" : "candle candle-down"}
+                  className={item.noTrades ? "candle candle-idle" : rising ? "candle candle-up" : "candle candle-down"}
                   key={`${item.time}-${index}`}
                   onMouseEnter={() => setHovered(index)}
                   onFocus={() => setHovered(index)}
                   tabIndex="0"
-                  aria-label={`${formatTime(item.time, range)} ${rising ? "up" : "down"} candle, open ${formatPrice(item.open)}, high ${formatPrice(item.high)}, low ${formatPrice(item.low)}, close ${formatPrice(item.close)}, volume ${item.volume.toFixed(4)} RLO`}
+                  aria-label={`${formatTime(item.time, range)} ${item.noTrades ? "no-trade" : rising ? "up" : "down"} candle, open ${formatPrice(item.open)}, high ${formatPrice(item.high)}, low ${formatPrice(item.low)}, close ${formatPrice(item.close)}, volume ${item.volume.toFixed(4)} RLO`}
                 >
-                  <title>{`${formatTime(item.time, range)} · ${rising ? "Up" : "Down"} · O ${formatPrice(item.open)} · H ${formatPrice(item.high)} · L ${formatPrice(item.low)} · C ${formatPrice(item.close)} · Vol ${item.volume.toFixed(4)} RLO`}</title>
+                  <title>{`${formatTime(item.time, range)} · ${item.noTrades ? "No trades (last close carried forward)" : rising ? "Up" : "Down"} · O ${formatPrice(item.open)} · H ${formatPrice(item.high)} · L ${formatPrice(item.low)} · C ${formatPrice(item.close)} · Vol ${item.volume.toFixed(4)} RLO`}</title>
                   <line className="candle-wick" x1={item.x} x2={item.x} y1={item.highY} y2={item.lowY} />
                   <rect className="candle-body" x={item.x - geometry.bodyWidth / 2} y={bodyTop} width={geometry.bodyWidth} height={bodyHeight} rx="1" />
-                  <rect className="volume-bar" x={item.x - geometry.bodyWidth / 2} y={item.volumeY} width={geometry.bodyWidth} height={Math.max(VOLUME_BOTTOM - item.volumeY, 1)} />
+                  {item.volume > 0 && <rect className="volume-bar" x={item.x - geometry.bodyWidth / 2} y={item.volumeY} width={geometry.bodyWidth} height={Math.max(VOLUME_BOTTOM - item.volumeY, 1)} />}
                   <rect className="candle-hit" x={item.x - Math.max(geometry.bodyWidth, 8)} y={PRICE_TOP} width={Math.max(geometry.bodyWidth * 2, 16)} height={VOLUME_BOTTOM - PRICE_TOP} />
                 </g>
               );
