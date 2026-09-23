@@ -241,7 +241,7 @@ export function App() {
       .then((remote) => { if (active) setConfirmedTrades(remote); })
       .catch(() => undefined);
     void refresh();
-    const timer = window.setInterval(refresh, 12_000);
+    const timer = window.setInterval(refresh, 7_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [selected?.id]);
   useEffect(() => {
@@ -262,7 +262,7 @@ export function App() {
       }
     };
     void refresh();
-    const timer = window.setInterval(refresh, 12_000);
+    const timer = window.setInterval(refresh, 7_000);
     return () => {
       active = false;
       window.clearInterval(timer);
