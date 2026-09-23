@@ -70,6 +70,30 @@ test("reports whether zero-cost storage bindings are active", async () => {
   assert.deepEqual(await response.json(), { ok: true, storage: false, imageStore: null });
 });
 
+test("serves shared on-chain reserves and mint from the market API", async () => {
+  const originalFetch = globalThis.fetch;
+  const bytes = new Uint8Array(128);
+  bytes[0] = 1;
+  bytes[8] = 1;
+  bytes[40] = 7;
+  bytes[88] = 2;
+  globalThis.fetch = async () => Response.json({ result: [{ value: [{
+    pubkey: "market-state", account: { data: [Buffer.from(bytes).toString("base64"), "base64"] },
+  }] }] });
+  try {
+    const response = await worker.fetch(new Request("https://example.test/api/markets"), {}, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.deepEqual(payload.markets, [{
+      state: "market-state", mint: "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM", phase: "curve",
+      virtualRloKelvin: "7", tokenReserveBaseUnits: "0", soldBaseUnits: "0",
+      actualRloKelvin: "2", feesKelvin: "0",
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("stores a bounded token image in the R2 binding", async () => {
   let stored;
   const response = await worker.fetch(new Request("https://example.test/api/images", {

@@ -11,8 +11,35 @@ const registryKey='rialofun:onchain-markets:v1';
 const validMarket=value=>value&&typeof value==='object'&&typeof value.id==='string'&&typeof value.name==='string'&&typeof value.ticker==='string'&&value.onchain&&typeof value.onchain.state==='string'&&typeof value.onchain.mint==='string';
 export function loadOnchainMarkets(){try{const parsed=JSON.parse(localStorage.getItem(registryKey)||'[]');return Array.isArray(parsed)?parsed.filter(validMarket):[]}catch{return[]}}
 export function saveOnchainMarket(market){const image=typeof market.image==='string'&&(market.image.startsWith('data:')||market.image.startsWith('/api/images/tokens/')||market.image.startsWith('https://'))?market.image:'';const safe={id:market.id,name:market.name,ticker:market.ticker,creator:market.creator,image,description:market.description||'',website:market.website||'',twitter:market.twitter||'',metadataPending:Boolean(market.metadataPending),createdAt:market.createdAt,updatedAt:market.updatedAt||market.createdAt,onchain:market.onchain};const existing=loadOnchainMarkets().filter(item=>item.id!==safe.id);localStorage.setItem(registryKey,JSON.stringify([safe,...existing].slice(0,100)));}
-export async function discoverOnchainMarkets(){const [entries]=await client.getAccountsByOwner(program);const saved=loadOnchainMarkets();return entries.filter(entry=>entry.account?.data?.[1]==='base64'&&entry.account.data[0]).flatMap(entry=>{const bytes=Uint8Array.from(atob(entry.account.data[0]),c=>c.charCodeAt(0));if(bytes.length!==128||bytes[0]!==1)return[];const state=entry.pubkey,mint=PublicKey.fromBytes(bytes.slice(8,40)).toString(),known=saved.find(item=>item.onchain?.state===state);return[{...createDiscoveredMarket(known,state,mint,bytes),onchain:{...(known?.onchain||{}),program:known?.onchain?.program||SETTLEMENT_PROGRAM,state,mint}}]})}
-function createDiscoveredMarket(known,state,mint,bytes){const read=o=>{let n=0n;for(let i=o+15;i>=o;i--)n=(n<<8n)|BigInt(bytes[i]);return Number(n)};return{...{id:`chain-${state.slice(0,8)}`,name:'Unverified token profile',ticker:`RLO-${mint.slice(0,4)}`,creator:'On-chain',image:'',createdAt:0,updatedAt:0,volumeRlo:0,netBuyers:0},...known,phase:bytes[3]===2?'pool':bytes[3]===1?'graduation-ready':'curve',virtualRlo:read(40)/1e9,tokenReserve:read(56)/1e6,actualRlo:read(88)/1e9,dataLoading:false,onchainHydrated:true}}
+export async function discoverOnchainMarkets(){
+  const saved=loadOnchainMarkets();
+  try {
+    const response=await fetch('/api/markets',{headers:{accept:'application/json'}});
+    if(!response.ok)throw new Error(`Market API returned ${response.status}`);
+    const payload=await response.json();
+    if(!Array.isArray(payload.markets))throw new Error('Invalid market API response');
+    return payload.markets.filter(item=>item.state&&item.mint).map(item=>{
+      const known=saved.find(market=>market.onchain?.state===item.state);
+      const virtualRlo=Number(item.virtualRloKelvin)/1e9;
+      const tokenReserve=Number(item.tokenReserveBaseUnits)/1e6;
+      const actualRlo=Number(item.actualRloKelvin)/1e9;
+      if(![virtualRlo,tokenReserve,actualRlo].every(Number.isFinite))throw new Error('Invalid market reserves');
+      return{...discoveredMarketIdentity(known,item.state,item.mint),phase:item.phase,
+        virtualRlo,tokenReserve,actualRlo,dataLoading:false,onchainHydrated:true,
+        onchain:{...(known?.onchain||{}),program:known?.onchain?.program||SETTLEMENT_PROGRAM,state:item.state,mint:item.mint}};
+    });
+  } catch {
+    const [entries]=await client.getAccountsByOwner(program);
+    return entries.filter(entry=>entry.account?.data?.[1]==='base64'&&entry.account.data[0]).flatMap(entry=>{
+      const bytes=Uint8Array.from(atob(entry.account.data[0]),c=>c.charCodeAt(0));
+      if(bytes.length!==128||bytes[0]!==1)return[];
+      const state=entry.pubkey,mint=PublicKey.fromBytes(bytes.slice(8,40)).toString(),known=saved.find(item=>item.onchain?.state===state);
+      return[{...createDiscoveredMarket(known,state,mint,bytes),onchain:{...(known?.onchain||{}),program:known?.onchain?.program||SETTLEMENT_PROGRAM,state,mint}}];
+    });
+  }
+}
+function discoveredMarketIdentity(known,state,mint){return{...{id:`chain-${state.slice(0,8)}`,name:'Unverified token profile',ticker:`RLO-${mint.slice(0,4)}`,creator:'On-chain',image:'',createdAt:0,updatedAt:0,volumeRlo:0,netBuyers:0},...known}}
+function createDiscoveredMarket(known,state,mint,bytes){const read=o=>{let n=0n;for(let i=o+15;i>=o;i--)n=(n<<8n)|BigInt(bytes[i]);return Number(n)};return{...discoveredMarketIdentity(known,state,mint),phase:bytes[3]===2?'pool':bytes[3]===1?'graduation-ready':'curve',virtualRlo:read(40)/1e9,tokenReserve:read(56)/1e6,actualRlo:read(88)/1e9,dataLoading:false,onchainHydrated:true}}
 
 async function walletSend(wallet,tx,summary,extraSigners=[]){
   if(extraSigners.length)tx.signAll(extraSigners); const feature=window.rialoTestnetWallet?.features?.['rialo:signTransaction']; if(!feature)throw new Error('Wallet signing feature is unavailable.');

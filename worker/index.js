@@ -58,6 +58,15 @@ function decodeBase58(value) {
   return Uint8Array.from(bytes);
 }
 
+function encodeBase58(bytes) {
+  let number = 0n;
+  for (const byte of bytes) number = (number << 8n) | BigInt(byte);
+  let encoded = "";
+  while (number) { encoded = BASE58[Number(number % 58n)] + encoded; number /= 58n; }
+  for (const byte of bytes) { if (byte !== 0) break; encoded = `1${encoded}`; }
+  return encoded;
+}
+
 function metadataMessage(market) {
   return JSON.stringify(["RialoFun metadata authorization v1", market.id, market.state, market.mint, market.creator,
     market.launchSignature, market.name, market.ticker, market.image, market.description, market.website, market.twitter, market.createdAt]);
@@ -290,7 +299,7 @@ async function handleOnchainMarkets() {
     const bytes = Uint8Array.from(atob(account.data[0]), (char) => char.charCodeAt(0));
     if (bytes.length !== 128 || bytes[0] !== 1) return [];
     const read = (offset) => { let value = 0n; for (let index = offset + 15; index >= offset; index -= 1) value = (value << 8n) | BigInt(bytes[index]); return value.toString(); };
-    return [{ state: entry.pubkey, phase: bytes[3] === 2 ? "pool" : bytes[3] === 1 ? "graduation-ready" : "curve", virtualRloKelvin: read(40), tokenReserveBaseUnits: read(56), soldBaseUnits: read(72), actualRloKelvin: read(88), feesKelvin: read(104) }];
+    return [{ state: entry.pubkey, mint: encodeBase58(bytes.slice(8, 40)), phase: bytes[3] === 2 ? "pool" : bytes[3] === 1 ? "graduation-ready" : "curve", virtualRloKelvin: read(40), tokenReserveBaseUnits: read(56), soldBaseUnits: read(72), actualRloKelvin: read(88), feesKelvin: read(104) }];
   });
   return json({ program: PROGRAM_ID, markets, fetchedAt: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=10" } });
 }
