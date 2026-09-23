@@ -806,7 +806,7 @@ export function App() {
                 {formatTokenPrice(spotPrice(selected))}
                 <small> per token</small>
               </p>
-              {detailRoute && <TokenChart ticker={selected.ticker} candles={candles} price={spotPrice(selected)} range={chartRange} loading={candlesLoading} error={candlesError} onRangeChange={setChartRange} />}
+              {detailRoute && <TokenChart ticker={selected.ticker} candles={candles} trades={confirmedTrades} range={chartRange} loading={candlesLoading} error={candlesError} onRangeChange={setChartRange} />}
               <section className="token-profile">
                 {selected.description && <p>{selected.description}</p>}
                 <div className="token-addresses">
