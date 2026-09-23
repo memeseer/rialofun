@@ -178,6 +178,7 @@ async function handleMetadata(request, env) {
         SELECT market_id, COUNT(*) AS holders FROM balances WHERE balance>0 GROUP BY market_id
       )
       SELECT m.id,m.state,m.mint,m.name,m.ticker,m.creator,m.image_url AS image,
+        CASE WHEN m.image_url <> '' THEN 1 ELSE 0 END AS profilePublished,
         m.created_at AS createdAt,m.updated_at AS updatedAt,m.description,m.website,m.twitter,m.launch_signature AS launchSignature,
         s.phase,s.virtual_rlo AS virtualRlo,s.token_reserve AS tokenReserve,
         s.actual_rlo AS actualRlo,
@@ -238,7 +239,9 @@ async function handleTrades(request, env, url) {
       if (alias?.id) marketId = alias.id;
     }
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 100);
-    const { results } = await db.prepare(`SELECT signature,market_id AS marketId,account,side,rlo_amount AS rloAmount,token_amount AS tokenAmount,price,block_time AS time,verified
+    const { results } = await db.prepare(`SELECT signature,market_id AS marketId,account,side,
+      CASE WHEN price>0 THEN rlo_amount END AS rloAmount,token_amount AS tokenAmount,
+      CASE WHEN price>0 THEN price END AS price,block_time AS time,verified
       FROM trades WHERE market_id=? AND verified=1 ORDER BY block_time DESC LIMIT ?`).bind(marketId, limit).all();
     return json({ trades: results }, { headers: { "cache-control": "public, max-age=10" } });
   }
@@ -262,10 +265,10 @@ async function handleTrades(request, env, url) {
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 200, 1), 500);
     const { results } = await db.prepare(`SELECT CAST(block_time / ? AS INTEGER) * ? AS time,
       MIN(price) AS low, MAX(price) AS high,
-      (SELECT price FROM trades t2 WHERE t2.market_id=t.market_id AND t2.verified=1 AND CAST(t2.block_time / ? AS INTEGER)=CAST(t.block_time / ? AS INTEGER) ORDER BY t2.block_time ASC LIMIT 1) AS open,
-      (SELECT price FROM trades t3 WHERE t3.market_id=t.market_id AND t3.verified=1 AND CAST(t3.block_time / ? AS INTEGER)=CAST(t.block_time / ? AS INTEGER) ORDER BY t3.block_time DESC LIMIT 1) AS close,
+      (SELECT price FROM trades t2 WHERE t2.market_id=t.market_id AND t2.verified=1 AND t2.price>0 AND CAST(t2.block_time / ? AS INTEGER)=CAST(t.block_time / ? AS INTEGER) ORDER BY t2.block_time ASC LIMIT 1) AS open,
+      (SELECT price FROM trades t3 WHERE t3.market_id=t.market_id AND t3.verified=1 AND t3.price>0 AND CAST(t3.block_time / ? AS INTEGER)=CAST(t.block_time / ? AS INTEGER) ORDER BY t3.block_time DESC LIMIT 1) AS close,
       SUM(rlo_amount) AS volume
-      FROM trades t WHERE market_id=? AND verified=1 GROUP BY CAST(block_time / ? AS INTEGER) ORDER BY time DESC LIMIT ?`)
+      FROM trades t WHERE market_id=? AND verified=1 AND price>0 GROUP BY CAST(block_time / ? AS INTEGER) ORDER BY time DESC LIMIT ?`)
       .bind(interval, interval, interval, interval, interval, interval, marketId, interval, limit).all();
     return json({ candles: results.reverse() }, { headers: { "cache-control": "public, max-age=10" } });
   }
@@ -279,7 +282,8 @@ async function handleOnchainMarkets() {
   });
   if (!rpc.ok) return json({ error: "Rialo RPC unavailable" }, { status: 502 });
   const payload = await rpc.json();
-  const entries = payload.result?.[0] ?? [];
+  if (payload.error) return json({ error: payload.error.message || "Rialo RPC error" }, { status: 502 });
+  const entries = payload.result?.[0]?.value ?? payload.result?.value ?? [];
   const markets = entries.flatMap((entry) => {
     const account = entry.account;
     if (!account || account.data?.[1] !== "base64") return [];

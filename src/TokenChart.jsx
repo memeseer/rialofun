@@ -51,7 +51,7 @@ function normalizeCandles(candles, price) {
   return normalized;
 }
 
-export function TokenChart({ ticker, candles, price, range, loading, onRangeChange }) {
+export function TokenChart({ ticker, candles, price, range, loading, error, onRangeChange }) {
   const series = useMemo(() => normalizeCandles(candles, price), [candles, price]);
   const [hovered, setHovered] = useState(null);
   useEffect(() => setHovered(null), [range, series.length]);
@@ -156,8 +156,8 @@ export function TokenChart({ ticker, candles, price, range, loading, onRangeChan
         </div>
       ) : (
         <div className="chart-empty">
-          <b>No indexed candles yet</b>
-          <span>The first confirmed trade will open this chart.</span>
+          <b>{error ? "Chart data is temporarily unavailable" : "No indexed candles yet"}</b>
+          <span>{error ? "The chart will retry automatically." : "The first confirmed trade will open this chart."}</span>
         </div>
       )}
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 import test from "node:test";
 import worker from "../worker/index.js";
-import { runIndexer } from "../worker/indexer.js";
+import { runIndexer, tokenAmountFromTransaction, receivedRloFromTransaction } from "../worker/indexer.js";
 
 test("serves existing static assets without a fallback", async () => {
   const calls = [];
@@ -143,6 +143,21 @@ test("keeps the indexer watermark unchanged when RPC has not returned a transact
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("indexes the exact minted amount when Rialo omits token balance arrays", () => {
+  const mint = "H3sVswmiM42SNR4TKFp9JddkgZ7G6TsXKFKrrjaatc43";
+  const keys = ["trader", "state", "token-account", mint, "system", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"];
+  const transaction = { meta: { innerInstructions: [{ instructionIndex: 5, instruction: {
+    accounts: [3, 2], data: "oicBcBFJmBuQH", programIdIndex: 5,
+  } }] } };
+  assert.equal(tokenAmountFromTransaction(transaction, 5, { tag: 0, mint, tokenAccountIndex: 2 }, keys), 31_945_788_964_182n);
+  assert.equal(tokenAmountFromTransaction(transaction, 4, { tag: 0, mint, tokenAccountIndex: 2 }, keys), 0n);
+});
+
+test("does not mistake a transaction fee for sell proceeds when Rialo omits native balances", () => {
+  assert.equal(receivedRloFromTransaction({ meta: { fee: 5000 } }, 0), 0);
+  assert.equal(receivedRloFromTransaction({ meta: { fee: 5000, preBalances: [1_000_000_000], postBalances: [1_999_995_000] } }, 0), 1);
 });
 
 test("emits the files required by Sites packaging", async () => {

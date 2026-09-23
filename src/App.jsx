@@ -48,6 +48,8 @@ const compact = (number) =>
 
 const shortAddress = (value = "") =>
   value.length > 13 ? `${value.slice(0, 5)}…${value.slice(-4)}` : value;
+const explorerAccount = (address) => `https://rialo-explorer-testnet-direct.vercel.app/accounts/${address}?network=testnet`;
+const explorerTransaction = (signature) => `https://rialo-explorer-testnet-direct.vercel.app/txs/${signature}?network=testnet`;
 
 const relativeTime = (value) => {
   const elapsed = Date.now() - Number(value || 0);
@@ -164,7 +166,7 @@ function TradeHistory({ trades, ticker }) {
           <strong data-label="Side" className={`history-side ${item.side === "BUY" ? "is-buy" : "is-sell"}`}>
             {item.side}
           </strong>
-          <span data-label="Value" className="history-number">{formatRlo(Number(item.rloAmount))}</span>
+          <span data-label="Value" className="history-number" title={item.rloAmount == null ? "Rialo RPC did not provide the native balance change" : undefined}>{item.rloAmount == null ? "—" : formatRlo(Number(item.rloAmount))}</span>
           <span data-label="Tokens" className="history-number">
             {item.tokenAmount ? `${compact(Number(item.tokenAmount))} ${ticker}` : "Pending index"}
           </span>
@@ -176,7 +178,7 @@ function TradeHistory({ trades, ticker }) {
           </time>
           <a
             className="history-tx"
-            href={`https://rialo-explorer-testnet-direct.vercel.app/txs/${item.signature}`}
+            href={explorerTransaction(item.signature)}
             target="_blank"
             rel="noreferrer"
             aria-label={`Open ${shortAddress(item.signature)} in Rialo explorer`}
@@ -224,6 +226,7 @@ export function App() {
   const [confirmedTrades, setConfirmedTrades] = useState([]);
   const [candles, setCandles] = useState([]);
   const [candlesLoading, setCandlesLoading] = useState(false);
+  const [candlesError, setCandlesError] = useState(false);
   const selected = markets.find((market) => market.id === tradeId) ?? null;
   useEffect(() => { if (detailRoute && tradeId && markets.length && !selected) window.location.hash = "explore"; }, [detailRoute, tradeId, markets, selected]);
   useEffect(() => {
@@ -236,7 +239,7 @@ export function App() {
     let active = true;
     const refresh = () => fetchMarketTrades(selected.id, selected.onchain?.state)
       .then((remote) => { if (active) setConfirmedTrades(remote); })
-      .catch(() => { if (active) setConfirmedTrades([]); });
+      .catch(() => undefined);
     void refresh();
     const timer = window.setInterval(refresh, 12_000);
     return () => { active = false; window.clearInterval(timer); };
@@ -251,9 +254,9 @@ export function App() {
       setCandlesLoading(true);
       try {
         const indexed = await fetchMarketCandles(selected.id, selected.onchain?.state, chartRange);
-        if (active) setCandles(indexed);
+        if (active) { setCandles(indexed); setCandlesError(false); }
       } catch {
-        if (active) setCandles([]);
+        if (active) setCandlesError(true);
       } finally {
         if (active) setCandlesLoading(false);
       }
@@ -326,9 +329,13 @@ export function App() {
       poolRlo: chain.phase === "pool" ? chain.actualRlo : 0,
       poolTokens: chain.phase === "pool" ? chain.tokenReserve : 0,
     };
-    setMarkets((current) =>
-      current.map((item) => (item.id === market.id ? next : item)),
-    );
+    setMarkets((current) => current.map((item) => item.onchain?.state === market.onchain.state
+      ? { ...item, phase: chain.phase, virtualRlo: chain.virtualRlo, tokenReserve: chain.tokenReserve,
+        actualRlo: chain.actualRlo, platformFees: chain.fees,
+        poolRlo: chain.phase === "pool" ? chain.actualRlo : 0,
+        poolTokens: chain.phase === "pool" ? chain.tokenReserve : 0,
+        dataLoading: false, onchainHydrated: true }
+      : item));
     if (address)
       setPortfolio((current) => ({
         ...current,
@@ -337,36 +344,56 @@ export function App() {
     return next;
   };
   useEffect(() => {
-    loadOnchainMarkets().filter((market) => !["rialo-live", "rialo-graduation"].includes(market.id)).forEach((market) => void syncMarket(market, wallet).catch(() => undefined));
-    void discoverOnchainMarkets().then((found) => setMarkets((current) => { const byState = new Map(found.map(item => [item.onchain.state, item])); return current.map(item => byState.has(item.onchain?.state) ? { ...item, ...byState.get(item.onchain.state) } : item).concat(found.filter(item => !current.some(existing => existing.onchain?.state === item.onchain.state))); })).catch(() => undefined);
+    loadOnchainMarkets().filter((market) => !["rialo-live", "rialo-graduation"].includes(market.id))
+      .forEach((market) => void syncMarket(market, wallet).catch(() => undefined));
+    let active = true;
+    const refresh = () => discoverOnchainMarkets().then((found) => {
+      if (!active) return;
+      setMarkets((current) => {
+        const byState = new Map(found.map((item) => [item.onchain.state, item]));
+        return current.map((item) => {
+          const chain = byState.get(item.onchain?.state);
+          return chain ? { ...chain, ...item, onchain: { ...chain.onchain, ...item.onchain },
+            phase: chain.phase, virtualRlo: chain.virtualRlo, tokenReserve: chain.tokenReserve,
+            actualRlo: chain.actualRlo, poolRlo: chain.phase === "pool" ? chain.actualRlo : 0,
+            poolTokens: chain.phase === "pool" ? chain.tokenReserve : 0,
+            onchainHydrated: true, dataLoading: false } : item;
+        }).concat(found.filter((item) => !current.some((existing) => existing.onchain?.state === item.onchain.state)));
+      });
+    }).catch(() => undefined);
+    void refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [wallet]);
   useEffect(() => {
     const hydrateSharedMetadata = () => fetchMarketMetadata().then((metadata) => setMarkets((current) => {
       const next = [...current];
       for (const saved of metadata) {
         const index = next.findIndex((market) => market.id === saved.id || market.onchain?.state === saved.state);
+        const profilePublished = Boolean(saved.profilePublished ?? saved.image);
         const patch = {
-          name: saved.name,
-          ticker: saved.ticker,
           creator: saved.creator,
-          image: saved.image,
-          description: saved.description || "",
-          website: saved.website || "",
-          twitter: saved.twitter || "",
+          ...(profilePublished ? {
+            name: saved.name, ticker: saved.ticker, image: saved.image,
+            description: saved.description || "", website: saved.website || "",
+            twitter: saved.twitter || "", metadataPending: false,
+          } : {}),
           createdAt: Number(saved.createdAt || 0) || undefined,
           updatedAt: Number(saved.updatedAt || saved.createdAt || 0) || undefined,
           volumeRlo: Number(saved.volumeRlo) || 0,
           netBuyers: Number(saved.netBuyers) || 0,
         };
-        if (saved.phase) patch.phase = saved.phase;
-        if (Number.isFinite(Number(saved.virtualRlo))) patch.virtualRlo = Number(saved.virtualRlo);
-        if (Number.isFinite(Number(saved.tokenReserve))) patch.tokenReserve = Number(saved.tokenReserve);
-        if (Number.isFinite(Number(saved.actualRlo))) patch.actualRlo = Number(saved.actualRlo);
         if (index >= 0) {
           next[index] = { ...next[index], ...patch, createdAt: patch.createdAt || next[index].createdAt, updatedAt: patch.updatedAt || next[index].updatedAt };
         } else if (saved.state && saved.mint) {
+          const snapshot = {};
+          if (saved.phase) snapshot.phase = saved.phase;
+          if (saved.virtualRlo != null && Number(saved.virtualRlo) > 0) snapshot.virtualRlo = Number(saved.virtualRlo);
+          if (saved.tokenReserve != null && Number(saved.tokenReserve) > 0) snapshot.tokenReserve = Number(saved.tokenReserve);
+          if (saved.actualRlo != null && Number.isFinite(Number(saved.actualRlo))) snapshot.actualRlo = Number(saved.actualRlo);
           next.push({
             ...createMarket({ id: saved.id, name: saved.name, ticker: saved.ticker, creator: saved.creator, image: saved.image }),
+            ...snapshot,
             ...patch,
             id: saved.id,
             onchain: { program: "2iquqTG5Frnj64kzwa5RFWawuJpXg3fYhMkTPiT22AiM", state: saved.state, mint: saved.mint },
@@ -779,13 +806,13 @@ export function App() {
                 {formatTokenPrice(spotPrice(selected))}
                 <small> per token</small>
               </p>
-              {detailRoute && <TokenChart ticker={selected.ticker} candles={candles} price={spotPrice(selected)} range={chartRange} loading={candlesLoading} onRangeChange={setChartRange} />}
+              {detailRoute && <TokenChart ticker={selected.ticker} candles={candles} price={spotPrice(selected)} range={chartRange} loading={candlesLoading} error={candlesError} onRangeChange={setChartRange} />}
               <section className="token-profile">
                 {selected.description && <p>{selected.description}</p>}
                 <div className="token-addresses">
-                  <span>Creator <a href={`https://rialo-explorer-testnet-direct.vercel.app/accounts/${selected.creator}`} target="_blank" rel="noreferrer">{shortAddress(selected.creator)} <ArrowSquareOut size={13} /></a></span>
-                  {selected.onchain?.mint && <span>Token <a href={`https://rialo-explorer-testnet-direct.vercel.app/accounts/${selected.onchain.mint}`} target="_blank" rel="noreferrer">{shortAddress(selected.onchain.mint)} <ArrowSquareOut size={13} /></a></span>}
-                  {selected.onchain?.pool?.pool && <span>Pool <a href={`https://rialo-explorer-testnet-direct.vercel.app/accounts/${selected.onchain.pool.pool}`} target="_blank" rel="noreferrer">{shortAddress(selected.onchain.pool.pool)} <ArrowSquareOut size={13} /></a></span>}
+                  <span>Creator <a href={explorerAccount(selected.creator)} target="_blank" rel="noreferrer">{shortAddress(selected.creator)} <ArrowSquareOut size={13} /></a></span>
+                  {selected.onchain?.mint && <span>Token <a href={explorerAccount(selected.onchain.mint)} target="_blank" rel="noreferrer">{shortAddress(selected.onchain.mint)} <ArrowSquareOut size={13} /></a></span>}
+                  {selected.onchain?.pool?.pool && <span>Pool <a href={explorerAccount(selected.onchain.pool.pool)} target="_blank" rel="noreferrer">{shortAddress(selected.onchain.pool.pool)} <ArrowSquareOut size={13} /></a></span>}
                   {selected.website && <a href={selected.website} target="_blank" rel="noreferrer">Website <ArrowSquareOut size={13} /></a>}
                   {selected.twitter && <a href={selected.twitter.startsWith("http") ? selected.twitter : `https://x.com/${selected.twitter.replace(/^@/, "")}`} target="_blank" rel="noreferrer">X / Twitter <ArrowSquareOut size={13} /></a>}
                 </div>
